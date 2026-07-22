@@ -23,6 +23,7 @@ const kinds = {
   weight: ['⚖️', '体重'], bath: ['🛁', '洗澡'], grooming: ['✂️', '美容'], other: ['📝', '其他']
 };
 const legacyKindNames = { appetite: ['🍽️', '食欲'], mood: ['🐾', '精神状态'] };
+const specialKindNames = { measurement: ['📐', '身体尺寸'] };
 const hiddenLegacyKinds = new Set(Object.keys(legacyKindNames));
 const careKinds = ['deworming', 'flea', 'vaccine', 'bath', 'grooming'];
 const quickKinds = ['vomit', 'diarrhea', 'vet', 'weight', 'deworming', 'other'];
@@ -40,10 +41,10 @@ const blankState = () => {
 };
 
 const icons = {
-  home: '<svg viewBox="0 0 24 24"><path d="M3 10.8 12 3l9 7.8v9.7a.5.5 0 0 1-.5.5H15v-7H9v7H3.5a.5.5 0 0 1-.5-.5v-9.7Z"/></svg>',
+  home: '<svg viewBox="0 0 24 24"><path d="M3.8 10.7 12 3.8l8.2 6.9v8.6a1.2 1.2 0 0 1-1.2 1.2h-4.4v-6.1H9.4v6.1H5a1.2 1.2 0 0 1-1.2-1.2v-8.6Z"/></svg>',
   clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
-  chart: '<svg viewBox="0 0 24 24"><path d="M4 20V10m6 10V4m6 16v-7m4 7H2"/></svg>',
-  settings: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>',
+  chart: '<svg viewBox="0 0 24 24"><path d="M4.2 19.8V13m5.2 6.8V8.6m5.2 11.2V4.2m5.2 15.6v-9.1"/></svg>',
+  settings: '<svg viewBox="0 0 24 24"><path d="M4.1 7.2h9.5m3.4 0h2.9M4.1 16.8H7m3.4 0h9.5"/><circle cx="15.3" cy="7.2" r="1.7"/><circle cx="8.7" cy="16.8" r="1.7"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9 3h6l1 4H8l1-4Zm-3 4 1 14h10l1-14M10 11v6m4-6v6"/></svg>',
   back: '<svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg>',
   chevron: '<svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
@@ -67,9 +68,10 @@ let toastTimer = null;
 const $ = selector => document.querySelector(selector);
 const pet = () => state.pets.find(item => item.id === state.selectedPetId);
 const allPetRecords = () => state.records.filter(item => item.petId === pet()?.id).sort((a, b) => new Date(b.date) - new Date(a.date));
-const records = () => allPetRecords().filter(item => !hiddenLegacyKinds.has(item.kind));
+const records = () => allPetRecords().filter(item => !hiddenLegacyKinds.has(item.kind) && item.kind !== 'measurement');
 const weights = () => records().filter(item => item.kind === 'weight' && Number.isFinite(Number(item.weight)));
-const kindInfo = kind => kinds[kind] || legacyKindNames[kind] || ['📝', '记录'];
+const measurements = () => allPetRecords().filter(item => item.kind === 'measurement');
+const kindInfo = kind => kinds[kind] || legacyKindNames[kind] || specialKindNames[kind] || ['📝', '记录'];
 const escapeHtml = value => String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const dayStart = value => { const d = new Date(value); d.setHours(0, 0, 0, 0); return d; };
 const shortDate = value => new Date(value).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
@@ -79,6 +81,40 @@ const isToday = value => dayStart(value).getTime() === dayStart(new Date()).getT
 const addDays = (date, days) => { const d = new Date(`${date}T12:00:00`); d.setDate(d.getDate() + Number(days)); return d; };
 const nextDate = reminder => reminder?.last ? addDays(reminder.last, reminder.interval) : null;
 const daysUntil = date => date ? Math.ceil((dayStart(date) - dayStart(new Date())) / 86400000) : null;
+const measurementFields = [['bodyLength', '身长'], ['chest', '胸围'], ['neck', '颈围'], ['height', '肩高'], ['backLength', '背长']];
+
+function petAge(birthday, now = new Date()) {
+  if (!birthday) return '';
+  const [year, month, day] = birthday.split('-').map(Number);
+  if (!year || !month || !day) return '';
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
+  const born = new Date(year, month - 1, day, 12);
+  if (born > today) return '';
+  let years = today.getFullYear() - year;
+  let anniversary = new Date(year + years, month - 1, day, 12);
+  if (anniversary > today) {
+    years -= 1;
+    anniversary = new Date(year + years, month - 1, day, 12);
+  }
+  const days = Math.floor((today - anniversary) / 86400000);
+  return `${years}岁${days}天`;
+}
+
+function birthdayInfo(currentPet, now = new Date()) {
+  if (!currentPet?.birthday) return null;
+  const [birthYear, month, day] = currentPet.birthday.split('-').map(Number);
+  if (!birthYear || !month || !day) return null;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
+  let year = today.getFullYear();
+  let birthday = new Date(year, month - 1, day, 12);
+  if (birthday < today) {
+    year += 1;
+    birthday = new Date(year, month - 1, day, 12);
+  }
+  const days = Math.round((birthday - today) / 86400000);
+  if (days < 0 || days > 7) return null;
+  return { days, age: year - birthYear };
+}
 
 const idb = new Promise((resolve, reject) => {
   const request = indexedDB.open('pawsnote-web', 2);
@@ -108,6 +144,7 @@ function migrate(input) {
   value.records.forEach(record => {
     record.photoPath ||= '';
     record.pendingPhoto ||= '';
+    if (record.kind === 'measurement') record.customMeasurements = Array.isArray(record.customMeasurements) ? record.customMeasurements : [];
   });
   value.selectedPetId = value.pets.some(item => item.id === value.selectedPetId) ? value.selectedPetId : (value.pets[0]?.id || '');
   return value;
@@ -126,7 +163,7 @@ function avatar(item, size = '') {
 }
 function nav() {
   const items = [['home', 'home', '日记'], ['reminders', 'clock', '提醒'], ['stats', 'chart', '统计'], ['settings', 'settings', '设置']];
-  return `<nav class="tabs" aria-label="主导航">${items.map(([id, icon, label]) => `<button class="tab ${(page === id || (page === 'detail' && id === 'stats')) ? 'active' : ''}" data-page="${id}">${icons[icon]}<span>${label}</span></button>`).join('')}</nav>`;
+  return `<nav class="tabs" aria-label="主导航">${items.map(([id, icon, label]) => { const active = page === id || (page === 'detail' && id === 'stats'); return `<button type="button" class="tab ${active ? 'active' : ''}" data-page="${id}" ${active ? 'aria-current="page"' : ''}><span class="tab-icon">${icons[icon]}</span><span class="tab-label">${label}</span></button>`; }).join('')}</nav>`;
 }
 function topbar(title = '', action = '') {
   if (title) return `<header class="topbar"><h1>${title}</h1>${action}</header>`;
@@ -150,7 +187,9 @@ function home() {
   const ws = weights(); const latest = ws[0]; const previous = ws[1]; const change = latest && previous ? Number(latest.weight) - Number(previous.weight) : null;
   const todayRecords = records().filter(record => isToday(record.date));
   const summary = reminderSummary(current);
+  const birthday = birthdayInfo(current);
   return `${topbar()}
+    ${birthday ? `<section class="birthday-banner"><span class="birthday-emoji">🎂</span><div><small>${birthday.days === 0 ? '生日快乐' : '生日倒计时'}</small><strong>${birthday.days === 0 ? `${escapeHtml(current.name)} 今天 ${birthday.age} 岁啦！` : `${escapeHtml(current.name)} 还有 ${birthday.days} 天满 ${birthday.age} 岁`}</strong></div><span class="birthday-confetti">✦</span></section>` : ''}
     <section class="hero"><p class="eyebrow">今天</p><h2>${latest && isToday(latest.date) ? `体重 ${Number(latest.weight).toFixed(2)} kg` : todayRecords.length ? `已记录 ${todayRecords.length} 个健康细节` : '今天感觉怎么样？'}</h2><p>为 ${escapeHtml(current.name)} 留住每一个健康细节</p></section>
     <section class="today-card"><div><span class="section-kicker">今日提醒</span><strong>${summary.overdue ? `${summary.overdue} 项已逾期` : summary.upcoming ? `未来 7 天有 ${summary.upcoming} 项` : '暂时没有紧急事项'}</strong></div><button data-page="reminders">查看${icons.chevron}</button></section>
     <div class="section-head"><h2>快速记录</h2><button class="link-button" id="add-record-secondary">全部</button></div>
@@ -179,8 +218,11 @@ function weightChart(items, large = false) {
 }
 function stats() {
   if (!pet()) return noPets();
-  const ws = weights(); const current = records();
-  return `${topbar('健康统计')}<section class="summary-strip"><div><b>${current.length}</b><span>全部记录</span></div><div><b>${ws.length ? Number(ws[0].weight).toFixed(2) : '—'}</b><span>最新体重 kg</span></div><div><b>${careKinds.filter(kind => daysUntil(nextDate(pet().reminders[kind])) < 0).length}</b><span>逾期提醒</span></div></section>
+  const ws = weights(); const current = records(); const ms = measurements(); const latestMeasurement = ms[0];
+  const measurementValue = (key, label) => `<div><span>${label}</span><strong>${Number(latestMeasurement?.[key]) > 0 ? `${Number(latestMeasurement[key]).toFixed(1)} <small>cm</small>` : '—'}</strong></div>`;
+  const measurementSummary = item => [...measurementFields.filter(([key]) => Number(item[key]) > 0).map(([key, label]) => `${label} ${Number(item[key]).toFixed(1)}`), ...(item.customMeasurements || []).filter(entry => Number(entry.value) > 0).map(entry => `${entry.name} ${Number(entry.value).toFixed(1)}`)].join(' · ');
+  return `${topbar('记录总览')}<section class="summary-strip"><div><b>${current.length + ms.length}</b><span>全部记录</span></div><div><b>${ws.length ? Number(ws[0].weight).toFixed(2) : '—'}</b><span>最新体重 kg</span></div><div><b>${careKinds.filter(kind => daysUntil(nextDate(pet().reminders[kind])) < 0).length}</b><span>逾期提醒</span></div></section>
+    <div class="section-head"><h2>身体尺寸</h2><button id="add-measurement" class="link-button">＋ 记录</button></div><section class="measurement-card"><div class="measurement-head"><span class="measurement-symbol">📐</span><div><strong>${latestMeasurement ? `最近测量 · ${localDate(latestMeasurement.date)}` : '还没有身体尺寸记录'}</strong><p>身长、胸围、颈围、肩高与背长</p></div></div><div class="measurement-grid">${measurementFields.map(([key, label]) => measurementValue(key, label)).join('')}</div>${latestMeasurement?.customMeasurements?.length ? `<div class="custom-measurement-summary">${latestMeasurement.customMeasurements.filter(entry => Number(entry.value) > 0).map(entry => `<span>${escapeHtml(entry.name)} <b>${Number(entry.value).toFixed(1)} cm</b></span>`).join('')}</div>` : ''}${ms.length ? `<div class="measurement-history"><span>共 ${ms.length} 次测量</span>${ms.slice(0,3).map(item => `<button class="measurement-history-row" data-measurement-record="${item.id}"><span>${localDate(item.date)}</span><strong>${escapeHtml(measurementSummary(item))} cm</strong></button>`).join('')}</div>` : '<p class="measurement-empty">点击右上角“记录”添加第一次测量。</p>'}</section>
     <div class="section-head"><h2>记录类型</h2><span>点击查看明细</span></div><section class="stats-grid">${Object.keys(kinds).map(kind => `<button class="stat-card" data-kind-detail="${kind}"><span>${kinds[kind][0]}</span><b>${current.filter(r => r.kind === kind).length}</b><small>${kinds[kind][1]}</small></button>`).join('')}</section>
     <div class="section-head"><h2>体重趋势</h2><span>${ws.length ? `${ws.length} 次记录` : ''}</span></div>${ws.length ? `<button class="chart-card" data-weight-detail>${weightChart(ws)}<span>点击查看完整记录</span></button>` : '<section class="card empty">添加第一条体重记录后，这里会显示变化趋势。</section>'}`;
 }
@@ -194,13 +236,13 @@ function cloudPanel() {
 }
 function settingsPage() {
   return `${topbar('设置', '<button id="add-pet" class="round-button mini" aria-label="添加宠物">＋</button>')}
-    <section class="settings-group"><h2>宠物</h2><div class="settings-card">${state.pets.map(item => `<button class="pet-row" data-edit-pet="${item.id}">${avatar(item, 'small')}<div><strong>${escapeHtml(item.name)}</strong><p>${escapeHtml([item.breed || '我的毛孩子', item.sex, item.sterilized].filter(Boolean).join(' · '))}</p></div>${item.id === state.selectedPetId ? '<span class="selected-badge">当前</span>' : ''}${icons.chevron}</button>`).join('')}</div></section>
+    <section class="settings-group"><h2>宠物</h2><div class="settings-card">${state.pets.map(item => `<button class="pet-row" data-edit-pet="${item.id}">${avatar(item, 'small')}<div><strong>${escapeHtml(item.name)}</strong><p>${escapeHtml([item.breed || '我的毛孩子', item.sex, item.sterilized, petAge(item.birthday)].filter(Boolean).join(' · '))}</p></div>${item.id === state.selectedPetId ? '<span class="selected-badge">当前</span>' : ''}${icons.chevron}</button>`).join('')}</div></section>
     ${cloudPanel()}
-    <section class="settings-group"><h2>提醒与日历</h2><div class="settings-card"><button id="notifications" class="settings-line">到期通知<span>${state.notificationEnabled ? '已开启' : '开启'} ›</span></button><button id="calendar-all-settings" class="settings-line">导出全部提醒到日历<span>›</span></button></div><p class="settings-hint">浏览器通知会在打开 PetLog 时检查；日历提醒可以在 App 未打开时正常出现。</p></section>
+    <section class="settings-group"><h2>提醒与日历</h2><div class="settings-card"><button id="notifications" class="settings-line">到期通知<span>${state.notificationEnabled ? '已开启' : '开启'} ›</span></button><button id="calendar-all-settings" class="settings-line">导出全部提醒到日历<span>›</span></button></div><p class="settings-hint">浏览器通知会在打开 petlog 时检查；日历提醒可以在 App 未打开时正常出现。</p></section>
     <section class="settings-group"><h2>资料与备份</h2><div class="settings-card"><button id="export" class="settings-line">导出 JSON 备份<span>›</span></button><button id="import" class="settings-line">导入 JSON 备份<span>›</span></button>${pet() ? '<button id="delete-pet" class="settings-line danger">删除当前宠物<span>›</span></button>' : ''}</div></section>
-    <footer class="app-footer"><strong>PetLog</strong><span>宠物健康记录 · 版本 2.0</span></footer>`;
+    <footer class="app-footer"><strong>petlog</strong><span>宠物健康记录 · 版本 2.1</span></footer>`;
 }
-function noPets() { return `${topbar('PetLog')}<section class="empty-state"><div>🐾</div><h2>添加你的第一只宠物</h2><p>开始记录健康、体重和护理提醒。</p><button id="add-pet" class="primary-button">添加宠物</button></section>`; }
+function noPets() { return `${topbar('petlog')}<section class="empty-state"><div>🐾</div><h2>添加你的第一只宠物</h2><p>开始记录健康、体重和护理提醒。</p><button id="add-pet" class="primary-button">添加宠物</button></section>`; }
 function toast(message, tone = 'success') {
   clearTimeout(toastTimer); let element = $('#toast'); if (!element) { element = document.createElement('div'); element.id = 'toast'; document.body.append(element); }
   element.className = `toast show ${tone}`; element.innerHTML = `<span>${escapeHtml(message)}</span><button aria-label="关闭">×</button>`; element.querySelector('button').onclick = () => element.classList.remove('show');
@@ -220,6 +262,8 @@ function bindPage() {
   document.querySelectorAll('[data-complete]').forEach(button => button.onclick = () => completeReminder(button.dataset.complete));
   document.querySelectorAll('[data-calendar]').forEach(button => button.onclick = () => exportCalendar([button.dataset.calendar]));
   $('#calendar-all')?.addEventListener('click', () => exportCalendar(careKinds)); $('#calendar-all-settings')?.addEventListener('click', () => exportCalendar(careKinds));
+  $('#add-measurement')?.addEventListener('click', openMeasurement);
+  document.querySelectorAll('[data-measurement-record]').forEach(button => button.onclick = () => { const item = state.records.find(record => record.id === button.dataset.measurementRecord); if (!item) return; const lines = [...measurementFields.filter(([key]) => Number(item[key]) > 0).map(([key,label]) => `${label}：${Number(item[key]).toFixed(1)} cm`), ...(item.customMeasurements || []).filter(entry => Number(entry.value) > 0).map(entry => `${entry.name}：${Number(entry.value).toFixed(1)} cm`)]; if (item.note) lines.push(`备注：${item.note}`); alert(`${dateTime(item.date)}\n${lines.join('\n')}`); });
   document.querySelectorAll('[data-kind-detail]').forEach(button => button.onclick = () => { detailKind = button.dataset.kindDetail; page = 'detail'; render(); });
   document.querySelectorAll('[data-weight-detail]').forEach(button => button.onclick = () => { detailKind = 'weight'; page = 'detail'; render(); });
   $('[data-back-stats]')?.addEventListener('click', () => { page = 'stats'; detailKind = null; render(); });
@@ -233,7 +277,8 @@ function setupDialogs() {
   document.querySelectorAll('.close').forEach(button => button.onclick = () => button.closest('dialog').close());
   $('#record-kind').innerHTML = Object.entries(kinds).map(([id, value]) => `<option value="${id}">${value[0]} ${value[1]}</option>`).join('');
   $('#record-kind').onchange = () => { $('#weight-field').hidden = $('#record-kind').value !== 'weight'; };
-  $('#record-form').onsubmit = saveRecord; $('#pet-form').onsubmit = savePet; $('#reminder-form').onsubmit = saveReminder;
+  $('#record-form').onsubmit = saveRecord; $('#pet-form').onsubmit = savePet; $('#reminder-form').onsubmit = saveReminder; $('#measurement-form').onsubmit = saveMeasurement;
+  $('#add-custom-measurement').onclick = () => addCustomMeasurementRow();
   $('#pet-form [name=avatar]').onchange = async event => { const data = await fileData(event.target.files[0], 700); if (data) { $('#avatar-preview').innerHTML = `<img src="${data}" alt="头像">`; $('#avatar-preview').dataset.value = data; } };
   $('#import-file').onchange = importData;
 }
@@ -244,7 +289,27 @@ async function saveRecord(event) {
   const file = form.get('photo'); const id = crypto.randomUUID(); let photo = '', photoPath = '', pendingPhoto = '';
   if (file?.size) photo = await fileData(file, 1600);
   state.records.push({ id, petId: pet().id, kind, date: form.get('date'), weight: kind === 'weight' ? weight : null, note: String(form.get('note') || '').trim(), photo, photoPath, pendingPhoto });
+  if (careKinds.includes(kind)) {
+    const reminder = pet().reminders[kind];
+    reminder.last = String(form.get('date')).slice(0, 10);
+    reminder.calendarAddedFor = '';
+  }
   await save(); $('#record-dialog').close(); render();
+}
+function addCustomMeasurementRow(name = '', value = '') {
+  const row = document.createElement('div'); row.className = 'custom-measurement-row';
+  row.innerHTML = `<input name="customName" aria-label="尺寸名称" placeholder="名称，如头围" value="${escapeHtml(name)}"><input name="customValue" aria-label="尺寸数值（厘米）" inputmode="decimal" placeholder="cm" value="${escapeHtml(value)}"><button type="button" aria-label="删除这个尺寸">×</button>`;
+  row.querySelector('button').onclick = () => row.remove(); $('#custom-measurements').append(row);
+}
+function openMeasurement() { if (!pet()) return; const form = $('#measurement-form'); form.reset(); $('#custom-measurements').innerHTML = ''; form.elements.date.value = todayISO(); $('#measurement-dialog').showModal(); }
+async function saveMeasurement(event) {
+  event.preventDefault(); const form = new FormData(event.target); const number = key => { const value = Number(String(form.get(key) || '').replace(',', '.')); return Number.isFinite(value) && value > 0 ? value : null; };
+  const values = Object.fromEntries(measurementFields.map(([key]) => [key, number(key)]));
+  const names = form.getAll('customName'); const customValues = form.getAll('customValue');
+  const customMeasurements = names.map((name, index) => ({ name: String(name).trim(), value: Number(String(customValues[index] || '').replace(',', '.')) })).filter(entry => entry.name && Number.isFinite(entry.value) && entry.value > 0);
+  if (!Object.values(values).some(Boolean) && !customMeasurements.length) return alert('请至少填写一项身体尺寸。');
+  state.records.push({ id: crypto.randomUUID(), petId: pet().id, kind: 'measurement', date: `${form.get('date')}T12:00`, ...values, customMeasurements, note: String(form.get('note') || '').trim(), photo: '', photoPath: '', pendingPhoto: '' });
+  await save(); $('#measurement-dialog').close(); render(); toast('身体尺寸已记录');
 }
 function openPet(id = null) { editingPetId = id; const current = id ? state.pets.find(item => item.id === id) : null; const form = $('#pet-form'); form.reset(); $('#pet-dialog-title').textContent = current ? '编辑宠物' : '添加宠物'; ['name','breed','sex','sterilized','birthday','chip'].forEach(key => form.elements[key].value = current?.[key] || ''); $('#avatar-preview').dataset.value = current?.avatar || ''; $('#avatar-preview').innerHTML = current?.avatar ? `<img src="${escapeHtml(current.avatar)}" alt="头像">` : ''; $('#pet-dialog').showModal(); }
 async function savePet(event) { event.preventDefault(); const form = new FormData(event.target); const current = editingPetId ? state.pets.find(item => item.id === editingPetId) : newPet(); const avatar = $('#avatar-preview').dataset.value || ''; Object.assign(current, { name: String(form.get('name')).trim(), breed: String(form.get('breed')).trim(), sex: String(form.get('sex') || ''), sterilized: String(form.get('sterilized') || ''), birthday: form.get('birthday'), chip: String(form.get('chip') || ''), avatar, avatarPath: '', pendingAvatar: '' }); if (!editingPetId) { state.pets.push(current); state.selectedPetId = current.id; } await save(); $('#pet-dialog').close(); render(); }
@@ -269,19 +334,19 @@ async function loginWithGoogle() { try { cloudStatus = { tone: 'syncing', text: 
 async function logout() { await signOut(auth); cloudUser = null; cloudReady = false; cloudStatus = { tone: 'neutral', text: '未登录' }; storageKey = 'guest'; await loadLocal('guest'); page = 'settings'; render(); }
 function setupCloud() { onAuthStateChanged(auth, async user => { if (user) await connectCloud(user); else { cloudUser = null; cloudReady = false; cloudStatus = { tone: 'neutral', text: '未登录' }; storageKey = 'guest'; await loadLocal('guest', true); } }); }
 
-function exportData() { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }); downloadBlob(blob, `PetLog-backup-${todayISO()}.json`); }
-async function importData(event) { const file = event.target.files[0]; if (!file) return; try { const imported = JSON.parse(await file.text()); if (!Array.isArray(imported.pets) || !Array.isArray(imported.records)) throw new Error('invalid'); if (!confirm('导入会替换当前账号在这台手机上的资料，确定继续吗？')) return; state = migrate(imported); await save(); render(); toast('备份导入完成'); } catch { alert('这不是有效的 PetLog 备份文件。'); } finally { event.target.value = ''; } }
+function exportData() { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }); downloadBlob(blob, `petlog-backup-${todayISO()}.json`); }
+async function importData(event) { const file = event.target.files[0]; if (!file) return; try { const imported = JSON.parse(await file.text()); if (!Array.isArray(imported.pets) || !Array.isArray(imported.records)) throw new Error('invalid'); if (!confirm('导入会替换当前账号在这台手机上的资料，确定继续吗？')) return; state = migrate(imported); await save(); render(); toast('备份导入完成'); } catch { alert('这不是有效的 petlog 备份文件。'); } finally { event.target.value = ''; } }
 function pad(n) { return String(n).padStart(2, '0'); }
 function icsDate(date, time = null) { const d = new Date(date); if (time) { const [h,m] = time.split(':').map(Number); d.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(m) ? m : 0, 0, 0); } return `${d.getUTCFullYear()}${pad(d.getUTCMonth()+1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`; }
 async function exportCalendar(kindList) {
   const current = pet(); if (!current) return; const events = [];
-  kindList.forEach(kind => { const r = current.reminders[kind]; const next = nextDate(r); if (!next) return; const eventStart = new Date(next); const [hour, minute] = (r.time || '09:00').split(':').map(Number); eventStart.setHours(hour, minute, 0, 0); const eventEnd = new Date(eventStart.getTime() + 30 * 60000); events.push(['BEGIN:VEVENT', `UID:${current.id}-${kind}-${next.toISOString().slice(0,10)}@petlog`, `DTSTAMP:${icsDate(new Date())}`, `DTSTART:${icsDate(eventStart)}`, `DTEND:${icsDate(eventEnd)}`, `SUMMARY:${current.name} · ${kinds[kind][1]}`, `DESCRIPTION:PetLog 提醒：${current.name} 的${kinds[kind][1]}到期。`, 'BEGIN:VALARM', 'TRIGGER:-P1D', 'ACTION:DISPLAY', `DESCRIPTION:明天需要为 ${current.name} 完成${kinds[kind][1]}`, 'END:VALARM', 'BEGIN:VALARM', 'TRIGGER:-PT2H', 'ACTION:DISPLAY', `DESCRIPTION:2 小时后需要为 ${current.name} 完成${kinds[kind][1]}`, 'END:VALARM', 'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', `DESCRIPTION:现在需要为 ${current.name} 完成${kinds[kind][1]}`, 'END:VALARM', 'END:VEVENT'].join('\r\n')); r.calendarAddedFor = next.toISOString().slice(0,10); });
+  kindList.forEach(kind => { const r = current.reminders[kind]; const next = nextDate(r); if (!next) return; const eventStart = new Date(next); const [hour, minute] = (r.time || '09:00').split(':').map(Number); eventStart.setHours(hour, minute, 0, 0); const eventEnd = new Date(eventStart.getTime() + 30 * 60000); events.push(['BEGIN:VEVENT', `UID:${current.id}-${kind}-${next.toISOString().slice(0,10)}@petlog`, `DTSTAMP:${icsDate(new Date())}`, `DTSTART:${icsDate(eventStart)}`, `DTEND:${icsDate(eventEnd)}`, `SUMMARY:${current.name} · ${kinds[kind][1]}`, `DESCRIPTION:petlog 提醒：${current.name} 的${kinds[kind][1]}到期。`, 'BEGIN:VALARM', 'TRIGGER:-P1D', 'ACTION:DISPLAY', `DESCRIPTION:明天需要为 ${current.name} 完成${kinds[kind][1]}`, 'END:VALARM', 'BEGIN:VALARM', 'TRIGGER:-PT2H', 'ACTION:DISPLAY', `DESCRIPTION:2 小时后需要为 ${current.name} 完成${kinds[kind][1]}`, 'END:VALARM', 'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', `DESCRIPTION:现在需要为 ${current.name} 完成${kinds[kind][1]}`, 'END:VALARM', 'END:VEVENT'].join('\r\n')); r.calendarAddedFor = next.toISOString().slice(0,10); });
   if (!events.length) return alert('请先为至少一个提醒填写“上次完成”日期。');
-  const ics = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//PetLog//Pet Care//ZH-CN','CALSCALE:GREGORIAN','METHOD:PUBLISH',...events,'END:VCALENDAR'].join('\r\n'); downloadBlob(new Blob([ics], { type: 'text/calendar;charset=utf-8' }), `PetLog-${current.name}-提醒.ics`); await save(); render(); toast('日历文件已生成，请用系统日历打开');
+  const ics = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//petlog//Pet Care//ZH-CN','CALSCALE:GREGORIAN','METHOD:PUBLISH',...events,'END:VCALENDAR'].join('\r\n'); downloadBlob(new Blob([ics], { type: 'text/calendar;charset=utf-8' }), `petlog-${current.name}-提醒.ics`); await save(); render(); toast('日历文件已生成，请用系统日历打开');
 }
 function downloadBlob(blob, name) { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 async function enableNotifications() { if (!('Notification' in window)) return alert('当前浏览器不支持通知，请使用“导出到日历”。'); const permission = await Notification.requestPermission(); state.notificationEnabled = permission === 'granted'; await save(); render(); if (permission === 'granted') { toast('到期检查已开启'); checkDueNotifications(true); } else alert('通知权限没有开启。你仍可使用日历提醒。'); }
-async function checkDueNotifications(force = false) { if (!state.notificationEnabled || Notification.permission !== 'granted' || !pet()) return; const key = `petlog-notified-${pet().id}-${todayISO()}`; if (!force && localStorage.getItem(key)) return; const due = careKinds.filter(kind => { const days = daysUntil(nextDate(pet().reminders[kind])); return days !== null && days <= 0; }); if (!due.length) return; const registration = await navigator.serviceWorker?.ready; const body = due.map(kind => `${kinds[kind][1]}${daysUntil(nextDate(pet().reminders[kind])) < 0 ? '已逾期' : '今天到期'}`).join('、'); if (registration) registration.showNotification(`${pet().name} 有 ${due.length} 项护理提醒`, { body, icon: './icon-192.png', badge: './icon-192.png', tag: `petlog-${pet().id}-${todayISO()}` }); else new Notification('PetLog 提醒', { body }); localStorage.setItem(key, '1'); }
+async function checkDueNotifications(force = false) { if (!state.notificationEnabled || Notification.permission !== 'granted' || !pet()) return; const key = `petlog-notified-${pet().id}-${todayISO()}`; if (!force && localStorage.getItem(key)) return; const due = careKinds.filter(kind => { const days = daysUntil(nextDate(pet().reminders[kind])); return days !== null && days <= 0; }); if (!due.length) return; const registration = await navigator.serviceWorker?.ready; const body = due.map(kind => `${kinds[kind][1]}${daysUntil(nextDate(pet().reminders[kind])) < 0 ? '已逾期' : '今天到期'}`).join('、'); if (registration) registration.showNotification(`${pet().name} 有 ${due.length} 项护理提醒`, { body, icon: './icon-192.png', badge: './icon-192.png', tag: `petlog-${pet().id}-${todayISO()}` }); else new Notification('petlog 提醒', { body }); localStorage.setItem(key, '1'); }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
 setupDialogs();

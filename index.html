@@ -6,12 +6,13 @@
   <meta name="theme-color" content="#f5f6f8">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="PetLog">
+  <meta name="apple-mobile-web-app-title" content="petlog">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" sizes="180x180" href="icon-192.png">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
-  <title>PetLog</title>
+  <link rel="stylesheet" href="petlog.css">
+  <title>petlog</title>
 </head>
 <body>
   <main id="app" aria-live="polite"></main>
@@ -28,6 +29,28 @@
       <label id="weight-field" hidden>体重（kg）<input name="weight" id="record-weight" inputmode="decimal" placeholder="例如 5.30"></label>
       <label>备注<textarea name="note" rows="3" placeholder="例如：饭后称重，精神不错"></textarea></label>
       <label>照片（可选）<input name="photo" type="file" accept="image/*"></label>
+    </form>
+  </dialog>
+
+  <dialog id="measurement-dialog" class="sheet">
+    <form id="measurement-form" method="dialog">
+      <div class="sheet-head">
+        <button type="button" class="text-button close">取消</button>
+        <h2>记录身体尺寸</h2>
+        <button class="text-button primary" value="default">保存</button>
+      </div>
+      <label>测量日期<input name="date" type="date" required></label>
+      <div class="measurement-form-grid">
+        <label>身长（cm）<input name="bodyLength" inputmode="decimal" placeholder="可选"></label>
+        <label>胸围（cm）<input name="chest" inputmode="decimal" placeholder="可选"></label>
+        <label>颈围（cm）<input name="neck" inputmode="decimal" placeholder="可选"></label>
+        <label>肩高（cm）<input name="height" inputmode="decimal" placeholder="可选"></label>
+        <label>背长（cm）<input name="backLength" inputmode="decimal" placeholder="可选"></label>
+      </div>
+      <div class="custom-measurement-head"><strong>其他尺寸</strong><button id="add-custom-measurement" type="button" class="link-button">＋ 添加</button></div>
+      <div id="custom-measurements" class="custom-measurements"></div>
+      <label>备注<textarea name="note" rows="3" placeholder="例如：自然站立时测量"></textarea></label>
+      <p class="hint">每次测量都会保存日期，可在「统计」中查看历史。</p>
     </form>
   </dialog>
 
@@ -74,7 +97,7 @@
       <label>每隔多少天<input name="interval" type="number" min="1" required></label>
       <label>上次完成<input name="last" type="date"></label>
       <label>提醒时间<input name="time" type="time" value="09:00"></label>
-      <p class="hint">填写上次完成日期后，PetLog 会自动计算下一次日期。</p>
+      <p class="hint">填写上次完成日期后，petlog 会自动计算下一次日期。</p>
     </form>
   </dialog>
 
