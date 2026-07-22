@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#f7f7f8">
+  <meta name="theme-color" content="#f5f6f8">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="PetLog">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="icon-192.png">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <title>PetLog</title>
 </head>
@@ -17,7 +18,11 @@
 
   <dialog id="record-dialog" class="sheet">
     <form id="record-form" method="dialog">
-      <div class="sheet-head"><button type="button" class="text-button close">取消</button><h2>新增记录</h2><button class="text-button primary" value="default">保存</button></div>
+      <div class="sheet-head">
+        <button type="button" class="text-button close">取消</button>
+        <h2>新增记录</h2>
+        <button class="text-button primary" value="default">保存</button>
+      </div>
       <label>记录类型<select name="kind" id="record-kind"></select></label>
       <label>日期和时间<input name="date" id="record-date" type="datetime-local" required></label>
       <label id="weight-field" hidden>体重（kg）<input name="weight" id="record-weight" inputmode="decimal" placeholder="例如 5.30"></label>
@@ -28,11 +33,32 @@
 
   <dialog id="pet-dialog" class="sheet">
     <form id="pet-form" method="dialog">
-      <div class="sheet-head"><button type="button" class="text-button close">取消</button><h2 id="pet-dialog-title">添加宠物</h2><button class="text-button primary" value="default">保存</button></div>
-      <label class="avatar-picker"><span id="avatar-preview" class="avatar large">🐾</span><span>点击选择头像</span><input name="avatar" type="file" accept="image/*"></label>
+      <div class="sheet-head">
+        <button type="button" class="text-button close">取消</button>
+        <h2 id="pet-dialog-title">添加宠物</h2>
+        <button class="text-button primary" value="default">保存</button>
+      </div>
+      <label class="avatar-picker">
+        <span id="avatar-preview" class="avatar large"></span>
+        <span>点击选择头像</span>
+        <input name="avatar" type="file" accept="image/*">
+      </label>
       <label>名字<input name="name" required placeholder="例如 Vinvin"></label>
       <label>品种<input name="breed" placeholder="例如 马尔济斯"></label>
-      <label>性别<input name="sex" placeholder="例如 女孩"></label>
+      <label>性别
+        <select name="sex">
+          <option value="">请选择</option>
+          <option value="男">男</option>
+          <option value="女">女</option>
+        </select>
+      </label>
+      <label>绝育状态
+        <select name="sterilized">
+          <option value="">请选择</option>
+          <option value="已绝育">已绝育</option>
+          <option value="未绝育">未绝育</option>
+        </select>
+      </label>
       <label>生日<input name="birthday" type="date"></label>
       <label>芯片号<input name="chip" placeholder="可选"></label>
     </form>
@@ -40,9 +66,14 @@
 
   <dialog id="reminder-dialog" class="sheet">
     <form id="reminder-form" method="dialog">
-      <div class="sheet-head"><button type="button" class="text-button close">取消</button><h2 id="reminder-title">编辑提醒</h2><button class="text-button primary" value="default">保存</button></div>
+      <div class="sheet-head">
+        <button type="button" class="text-button close">取消</button>
+        <h2 id="reminder-title">编辑提醒</h2>
+        <button class="text-button primary" value="default">保存</button>
+      </div>
       <label>每隔多少天<input name="interval" type="number" min="1" required></label>
       <label>上次完成<input name="last" type="date"></label>
+      <label>提醒时间<input name="time" type="time" value="09:00"></label>
       <p class="hint">填写上次完成日期后，PetLog 会自动计算下一次日期。</p>
     </form>
   </dialog>

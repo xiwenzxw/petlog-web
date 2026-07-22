@@ -1,28 +1,48 @@
 # PetLog 网页 App
 
-这是 PetLog 的免费离线网页版本。健康资料、照片和提醒只保存在使用它的 iPhone 浏览器中；网站本身不接收或储存你的资料。
+PetLog 是一个可以安装到 iPhone 主屏幕的宠物健康记录、护理提醒与成长档案 PWA。
 
-## 免费发布到 GitHub Pages
+## 已完成的功能
 
-1. 注册或登录 GitHub，创建一个公开仓库，例如 `petlog-web`。
-2. 将这个文件夹内的全部文件上传到仓库根目录。
-3. 在仓库打开 **Settings → Pages**，将发布来源设为 `Deploy from a branch`，选择 `main` 和 `/(root)`，然后保存。
-4. GitHub 会给你一个免费的 `https://你的用户名.github.io/petlog-web/` 地址。
+- 多只宠物独立管理与切换
+- 宠物头像、品种、生日、芯片号、性别和绝育状态
+- 呕吐、拉稀、看医生、内驱、外驱、疫苗、体重、洗澡、美容及其他记录
+- 首页快速记录、今日提醒、最近记录和最新体重
+- 一键完成护理并自动计算下一次日期
+- 体重折线趋势、分类统计及全部历史明细
+- 免费导出 `.ics` 日历事件，包含提前 1 天、提前 2 小时和到期时三次提醒
+- 打开 App 时检查到期项目的浏览器通知
+- Google 登录及 Firestore 自动同步
+- 同一设备上的不同 Google 账号使用各自独立的本地和云端资料
+- JSON 完整备份与恢复
+- 离线访问及 iPhone 主屏幕安装
 
-## 安装到 iPhone 主屏幕
+## 上传到 GitHub
 
-1. 用 iPhone Safari 打开上述地址。
-2. 点击底部「分享」按钮。
-3. 选择「加入主屏幕」，名称保留 PetLog。
+将压缩包里的全部文件上传并覆盖仓库根目录。GitHub Pages 继续设置为：
 
-之后可从主屏幕直接打开。首次打开后，网页会缓存为离线可用。
+- Branch：`main`
+- Folder：`/(root)`
 
-## 备份
+发布完成后，用 Safari 打开 GitHub Pages 地址，点击“分享”→“添加到主屏幕”。主屏幕名称会显示为 **PetLog**。
 
-进入「宠物」页，点「导出备份文件」，把 JSON 文件保存到 iCloud Drive 或“文件”。换手机后打开网页，再点「导入备份文件」即可恢复。
+## Firebase 设置
 
-## Google 自动同步
+现有 Firebase 项目 `petlog-backup` 的配置已保留，不会因为 App 改版而断开已有账号和数据。
 
-发布最新文件后，首次打开 PetLog 时点击顶部的「Google 登录」，在弹出的 Google 页面选择帐号即可。资料会保留在手机本机，同时自动同步至该 Google 帐号的私人 Firebase 数据库。朋友也可以用自己的 Google 帐号登录；每个帐号的数据彼此独立，互相看不到。
+1. Firebase Authentication 中启用 Google 登录。
+2. Authentication → Settings → Authorized domains 中加入你的 GitHub Pages 域名。
+3. Firestore → Rules 中使用本包的 `firestore.rules` 并发布。
 
-如果 Google 登录提示「未经授权的域名」，在 Firebase Console 打开 `Authentication → 设置 → 已获授权的网域`，添加 GitHub Pages 的域名，例如 `你的用户名.github.io`（不要加 `https://` 或路径）。
+文字和护理记录在 Firestore 中按用户 UID 隔离。照片和宠物头像保存在当前手机，并包含在 JSON 备份中，不写入 Firestore。
+
+## 关于照片和免费方案
+
+从 2026 年 2 月起，Firebase Storage 要求项目升级为 Blaze 并绑定付款账号。因此这个完全免费版本没有启用 Storage，避免产生付费依赖。以后如果决定启用 Blaze，可以再把照片迁移到 Storage；现有文字记录结构无需更改。
+
+## 数据兼容
+
+- 保留原 Firestore 文档路径 `users/{uid}/app/pawsnote`，所以旧云端记录仍可恢复。
+- 自动迁移旧版 IndexedDB 数据。
+- 旧版“食欲”和“精神状态”数据不会删除，只是不再显示为主要记录类型。
+- Firebase 技术项目 ID 保持不变。
