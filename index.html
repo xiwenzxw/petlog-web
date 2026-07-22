@@ -66,7 +66,7 @@
         <span>点击选择头像</span>
         <input name="avatar" type="file" accept="image/*">
       </label>
-      <label>名字<input name="name" required placeholder="例如 Vinvin"></label>
+      <label>名字<input name="name" required placeholder="宠物名字"></label>
       <label>品种<input name="breed" placeholder="例如 马尔济斯"></label>
       <label>性别
         <select name="sex">
@@ -99,6 +99,33 @@
       <label>提醒时间<input name="time" type="time" value="09:00"></label>
       <p class="hint">填写上次完成日期后，petlog 会自动计算下一次日期。</p>
     </form>
+  </dialog>
+
+  <dialog id="family-dialog" class="sheet">
+    <div class="family-dialog-body">
+      <div class="sheet-head">
+        <button type="button" class="text-button close">取消</button>
+        <h2 id="family-dialog-title">共同照顾</h2>
+        <span class="sheet-head-spacer"></span>
+      </div>
+      <section id="invite-owner-area" class="invite-owner-area">
+        <div class="invite-illustration">🏠</div>
+        <h3>邀请共同照顾者</h3>
+        <p>把下面的邀请码发给朋友。对方登录自己的 Google 账号后输入邀请码，就能共同管理这个家庭的宠物。</p>
+        <div class="invite-code" id="invite-code">—</div>
+        <button id="copy-invite" type="button" class="primary-button wide">复制邀请码</button>
+        <p class="privacy-note">邀请码只用于加入家庭，请只分享给你信任的人。</p>
+      </section>
+      <form id="join-family-form">
+        <section id="join-family-area" class="join-family-area">
+          <div class="invite-illustration">🐾</div>
+          <h3>加入朋友的家庭</h3>
+          <p>输入朋友发给你的 8 位邀请码。加入后，你们的宠物、记录、提醒和身体尺寸会保持同步。</p>
+          <label>家庭邀请码<input name="code" required maxlength="8" autocomplete="one-time-code" autocapitalize="characters" placeholder="例如 AB3D7K9P"></label>
+          <button class="primary-button wide">加入家庭</button>
+        </section>
+      </form>
+    </div>
   </dialog>
 
   <input id="import-file" type="file" accept="application/json" hidden>

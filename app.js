@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
+import { getFirestore, collection, deleteDoc, doc, getDoc, onSnapshot, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDiu-6FY1u6tegbsMYJlm1v_Yn2QVvUubM',
@@ -35,10 +35,30 @@ const defaultReminders = () => Object.fromEntries(careKinds.map(kind => [kind, {
 const newPet = (name = '', breed = '') => ({
   id: crypto.randomUUID(), name, breed, sex: '', sterilized: '', birthday: '', chip: '', avatar: '', avatarPath: '', pendingAvatar: '', reminders: defaultReminders()
 });
-const blankState = () => {
-  const pets = [newPet('Vinvin', '马尔济斯'), newPet('果冻', '马尔济斯')];
-  return { version: 2, modifiedAt: new Date().toISOString(), selectedPetId: pets[0].id, pets, records: [], notificationEnabled: false };
-};
+const blankState = () => ({
+  version: 3,
+  modifiedAt: new Date().toISOString(),
+  selectedPetId: '',
+  pets: [],
+  records: [],
+  notificationEnabled: false
+});
+
+function isUntouchedLegacyDemo(input) {
+  if (!input || !Array.isArray(input.pets) || !Array.isArray(input.records) || input.records.length) return false;
+  if (input.pets.length !== 2) return false;
+  const expected = [['Vinvin', '马尔济斯'], ['果冻', '马尔济斯']];
+  return input.pets.every((item, index) => {
+    const profileIsUntouched = item?.name === expected[index][0]
+      && item?.breed === expected[index][1]
+      && !item.sex && !item.sterilized && !item.birthday && !item.chip && !item.avatar;
+    const remindersAreUntouched = careKinds.every(kind => {
+      const reminder = item?.reminders?.[kind];
+      return !reminder || (!reminder.last && !reminder.calendarAddedFor && Number(reminder.interval || defaults[kind]) === defaults[kind]);
+    });
+    return profileIsUntouched && remindersAreUntouched;
+  });
+}
 
 const icons = {
   home: '<svg viewBox="0 0 24 24"><path d="M3.8 10.7 12 3.8l8.2 6.9v8.6a1.2 1.2 0 0 1-1.2 1.2h-4.4v-6.1H9.4v6.1H5a1.2 1.2 0 0 1-1.2-1.2v-8.6Z"/></svg>',
@@ -64,6 +84,12 @@ let cloudSyncTimer = null;
 let cloudStatus = { tone: 'neutral', text: '未登录' };
 let storageKey = 'guest';
 let toastTimer = null;
+let familyProfile = { activeFamilyId: '', families: [] };
+let activeFamily = null;
+let familyMembers = [];
+let familyUnsubscribe = null;
+let memberUnsubscribe = null;
+let applyingRemote = false;
 
 const $ = selector => document.querySelector(selector);
 const pet = () => state.pets.find(item => item.id === state.selectedPetId);
@@ -82,6 +108,8 @@ const addDays = (date, days) => { const d = new Date(`${date}T12:00:00`); d.setD
 const nextDate = reminder => reminder?.last ? addDays(reminder.last, reminder.interval) : null;
 const daysUntil = date => date ? Math.ceil((dayStart(date) - dayStart(new Date())) / 86400000) : null;
 const measurementFields = [['bodyLength', '身长'], ['chest', '胸围'], ['neck', '颈围'], ['height', '肩高'], ['backLength', '背长']];
+const actor = () => cloudUser ? { uid: cloudUser.uid, name: cloudUser.displayName || cloudUser.email || '共同照顾者', email: cloudUser.email || '' } : null;
+const actorLabel = record => record?.createdBy?.name || record?.createdBy?.email || '';
 
 function petAge(birthday, now = new Date()) {
   if (!birthday) return '';
@@ -132,7 +160,7 @@ async function dbPut(key, value) {
 }
 function migrate(input) {
   const value = input && Array.isArray(input.pets) && Array.isArray(input.records) ? input : blankState();
-  value.version = 2;
+  value.version = 3;
   value.modifiedAt ||= new Date().toISOString();
   value.notificationEnabled ??= false;
   value.pets.forEach(item => {
@@ -152,7 +180,9 @@ function migrate(input) {
 async function loadLocal(key = storageKey, allowLegacy = false) {
   let value = await dbGet(`state:${key}`);
   if (!value && allowLegacy) value = await dbGet('state');
-  state = migrate(value || blankState());
+  const removeUnusedDemo = key === 'guest' && isUntouchedLegacyDemo(value);
+  state = migrate(removeUnusedDemo ? blankState() : (value || blankState()));
+  if (removeUnusedDemo) await dbPut('state:guest', state);
   render();
 }
 async function saveLocal() { state.modifiedAt = new Date().toISOString(); await dbPut(`state:${storageKey}`, state); }
@@ -172,8 +202,8 @@ function topbar(title = '', action = '') {
 }
 function recordRows(list, emptyText = '还没有记录，点击右上角 ＋ 开始记录。') {
   if (!list.length) return `<div class="empty">${emptyText}</div>`;
-  return list.map(record => { const info = kindInfo(record.kind); return `<article class="record">
-    <span class="record-icon">${info[0]}</span><div class="record-main"><strong>${info[1]}${record.kind === 'weight' ? ` · ${Number(record.weight).toFixed(2)} kg` : ''}</strong>${record.note ? `<p>${escapeHtml(record.note)}</p>` : ''}</div>
+  return list.map(record => { const info = kindInfo(record.kind); const by = actorLabel(record); return `<article class="record">
+    <span class="record-icon">${info[0]}</span><div class="record-main"><strong>${info[1]}${record.kind === 'weight' ? ` · ${Number(record.weight).toFixed(2)} kg` : ''}</strong>${record.note ? `<p>${escapeHtml(record.note)}</p>` : ''}${by ? `<small class="record-author">由 ${escapeHtml(by)} 添加</small>` : ''}</div>
     ${record.photo ? `<img class="record-photo" src="${escapeHtml(record.photo)}" alt="记录照片">` : ''}<time>${dateTime(record.date)}</time>
     <button class="delete-record" data-delete-record="${record.id}" aria-label="删除这条记录">${icons.trash}</button></article>`; }).join('');
 }
@@ -190,7 +220,7 @@ function home() {
   const birthday = birthdayInfo(current);
   return `${topbar()}
     ${birthday ? `<section class="birthday-banner"><span class="birthday-emoji">🎂</span><div><small>${birthday.days === 0 ? '生日快乐' : '生日倒计时'}</small><strong>${birthday.days === 0 ? `${escapeHtml(current.name)} 今天 ${birthday.age} 岁啦！` : `${escapeHtml(current.name)} 还有 ${birthday.days} 天满 ${birthday.age} 岁`}</strong></div><span class="birthday-confetti">✦</span></section>` : ''}
-    <section class="hero"><p class="eyebrow">今天</p><h2>${latest && isToday(latest.date) ? `体重 ${Number(latest.weight).toFixed(2)} kg` : todayRecords.length ? `已记录 ${todayRecords.length} 个健康细节` : '今天感觉怎么样？'}</h2><p>为 ${escapeHtml(current.name)} 留住每一个健康细节</p></section>
+    <section class="hero"><p class="eyebrow">今天</p><h2>${latest && isToday(latest.date) ? `体重 ${Number(latest.weight).toFixed(2)} kg` : todayRecords.length ? `已记录 ${todayRecords.length} 个健康细节` : '今天感觉怎么样？'}</h2></section>
     <section class="today-card"><div><span class="section-kicker">今日提醒</span><strong>${summary.overdue ? `${summary.overdue} 项已逾期` : summary.upcoming ? `未来 7 天有 ${summary.upcoming} 项` : '暂时没有紧急事项'}</strong></div><button data-page="reminders">查看${icons.chevron}</button></section>
     <div class="section-head"><h2>快速记录</h2><button class="link-button" id="add-record-secondary">全部</button></div>
     <section class="quick-grid">${quickKinds.map(kind => `<button class="quick-action" data-quick-kind="${kind}"><span>${kinds[kind][0]}</span><small>${kinds[kind][1]}</small></button>`).join('')}</section>
@@ -232,15 +262,23 @@ function detailPage() {
 }
 function cloudPanel() {
   const email = cloudUser?.email || '';
-  return `<section class="settings-group"><h2>账号与同步</h2><div class="settings-card"><div class="cloud-row"><span class="settings-symbol">${icons.cloud}</span><div><strong>${cloudUser ? escapeHtml(email) : 'Google 云端备份'}</strong><p><span class="status-dot ${cloudStatus.tone}"></span>${escapeHtml(cloudStatus.text)}</p></div><button id="${cloudUser ? 'logout' : 'login'}" class="pill-button">${cloudUser ? '退出' : '登录'}</button></div>${cloudUser ? '<button id="sync-now" class="settings-line">立即同步<span>›</span></button>' : ''}</div><p class="settings-hint">每个 Google 账号拥有独立资料。文字记录会免费同步；照片保留在本机，并包含在 JSON 备份中。</p></section>`;
+  return `<section class="settings-group"><h2>账号与同步</h2><div class="settings-card"><div class="cloud-row"><span class="settings-symbol">${icons.cloud}</span><div><strong>${cloudUser ? escapeHtml(email) : 'Google 云端备份'}</strong><p><span class="status-dot ${cloudStatus.tone}"></span>${escapeHtml(cloudStatus.text)}</p></div><button id="${cloudUser ? 'logout' : 'login'}" class="pill-button">${cloudUser ? '退出' : '登录'}</button></div>${cloudUser ? '<button id="sync-now" class="settings-line">立即同步<span>›</span></button>' : ''}</div><p class="settings-hint">登录后可与共同照顾者实时共享文字记录；照片保留在各自手机，并包含在 JSON 备份中。</p></section>`;
+}
+function familyPanel() {
+  if (!cloudUser) return `<section class="settings-group"><h2>共同照顾</h2><div class="settings-card"><button id="login-family" class="settings-line">登录后创建或加入家庭<span>›</span></button></div><p class="settings-hint">你和朋友可以使用各自的 Google 账号，共同管理同一组宠物。</p></section>`;
+  const role = activeFamily?.ownerId === cloudUser.uid ? '管理员' : '共同照顾者';
+  const familyChoices = (familyProfile.families || []).map(item => `<option value="${escapeHtml(item.id)}" ${item.id === activeFamily?.id ? 'selected' : ''}>${escapeHtml(item.name || '我的家庭')}</option>`).join('');
+  const members = familyMembers.map(member => `<div class="member-row"><span class="member-avatar">${escapeHtml((member.displayName || member.email || '?').slice(0, 1).toUpperCase())}</span><div><strong>${escapeHtml(member.displayName || member.email || '共同照顾者')}</strong><p>${member.uid === activeFamily?.ownerId ? '管理员' : '共同照顾者'}${member.email && member.displayName ? ` · ${escapeHtml(member.email)}` : ''}</p></div>${activeFamily?.ownerId === cloudUser.uid && member.uid !== cloudUser.uid ? `<button class="member-remove" data-remove-member="${escapeHtml(member.uid)}">移除</button>` : ''}</div>`).join('');
+  return `<section class="settings-group"><h2>共同照顾</h2><div class="settings-card family-card"><div class="family-heading"><span class="family-symbol">🏠</span><div><strong>${escapeHtml(activeFamily?.name || '我的家庭')}</strong><p>${role} · ${familyMembers.length || 1} 位成员</p></div><button id="open-family" class="pill-button">管理</button></div>${familyChoices ? `<label class="family-switcher">当前家庭<select id="family-select">${familyChoices}</select></label>` : ''}<div class="member-list">${members}</div><button id="join-family" class="settings-line">输入邀请码加入其他家庭<span>›</span></button></div><p class="settings-hint">家庭中的成员能共同查看、添加和修改宠物资料、记录与提醒。</p></section>`;
 }
 function settingsPage() {
   return `${topbar('设置', '<button id="add-pet" class="round-button mini" aria-label="添加宠物">＋</button>')}
     <section class="settings-group"><h2>宠物</h2><div class="settings-card">${state.pets.map(item => `<button class="pet-row" data-edit-pet="${item.id}">${avatar(item, 'small')}<div><strong>${escapeHtml(item.name)}</strong><p>${escapeHtml([item.breed || '我的毛孩子', item.sex, item.sterilized, petAge(item.birthday)].filter(Boolean).join(' · '))}</p></div>${item.id === state.selectedPetId ? '<span class="selected-badge">当前</span>' : ''}${icons.chevron}</button>`).join('')}</div></section>
     ${cloudPanel()}
+    ${familyPanel()}
     <section class="settings-group"><h2>提醒与日历</h2><div class="settings-card"><button id="notifications" class="settings-line">到期通知<span>${state.notificationEnabled ? '已开启' : '开启'} ›</span></button><button id="calendar-all-settings" class="settings-line">导出全部提醒到日历<span>›</span></button></div><p class="settings-hint">浏览器通知会在打开 petlog 时检查；日历提醒可以在 App 未打开时正常出现。</p></section>
     <section class="settings-group"><h2>资料与备份</h2><div class="settings-card"><button id="export" class="settings-line">导出 JSON 备份<span>›</span></button><button id="import" class="settings-line">导入 JSON 备份<span>›</span></button>${pet() ? '<button id="delete-pet" class="settings-line danger">删除当前宠物<span>›</span></button>' : ''}</div></section>
-    <footer class="app-footer"><strong>petlog</strong><span>宠物健康记录 · 版本 2.1</span></footer>`;
+    <footer class="app-footer"><strong>petlog</strong><span>宠物健康记录 · 版本 3.0</span></footer>`;
 }
 function noPets() { return `${topbar('petlog')}<section class="empty-state"><div>🐾</div><h2>添加你的第一只宠物</h2><p>开始记录健康、体重和护理提醒。</p><button id="add-pet" class="primary-button">添加宠物</button></section>`; }
 function toast(message, tone = 'success') {
@@ -271,16 +309,20 @@ function bindPage() {
   document.querySelectorAll('[data-chart-record]').forEach(point => { const show = () => { const r = state.records.find(item => item.id === point.dataset.chartRecord); if (r) alert(`${dateTime(r.date)}\n体重：${Number(r.weight).toFixed(2)} kg${r.note ? `\n备注：${r.note}` : ''}`); }; point.onclick = show; point.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') show(); }; });
   $('#export')?.addEventListener('click', exportData); $('#import')?.addEventListener('click', () => $('#import-file').click()); $('#delete-pet')?.addEventListener('click', deletePet);
   $('#login')?.addEventListener('click', loginWithGoogle); $('#logout')?.addEventListener('click', logout); $('#sync-now')?.addEventListener('click', () => syncCloud(true)); $('#notifications')?.addEventListener('click', enableNotifications);
+  $('#login-family')?.addEventListener('click', loginWithGoogle); $('#open-family')?.addEventListener('click', () => openFamilyDialog(false)); $('#join-family')?.addEventListener('click', () => openFamilyDialog(true));
+  $('#family-select')?.addEventListener('change', event => switchFamily(event.target.value));
+  document.querySelectorAll('[data-remove-member]').forEach(button => button.onclick = () => removeFamilyMember(button.dataset.removeMember));
 }
 
 function setupDialogs() {
   document.querySelectorAll('.close').forEach(button => button.onclick = () => button.closest('dialog').close());
   $('#record-kind').innerHTML = Object.entries(kinds).map(([id, value]) => `<option value="${id}">${value[0]} ${value[1]}</option>`).join('');
   $('#record-kind').onchange = () => { $('#weight-field').hidden = $('#record-kind').value !== 'weight'; };
-  $('#record-form').onsubmit = saveRecord; $('#pet-form').onsubmit = savePet; $('#reminder-form').onsubmit = saveReminder; $('#measurement-form').onsubmit = saveMeasurement;
+  $('#record-form').onsubmit = saveRecord; $('#pet-form').onsubmit = savePet; $('#reminder-form').onsubmit = saveReminder; $('#measurement-form').onsubmit = saveMeasurement; $('#join-family-form').onsubmit = joinFamily;
   $('#add-custom-measurement').onclick = () => addCustomMeasurementRow();
   $('#pet-form [name=avatar]').onchange = async event => { const data = await fileData(event.target.files[0], 700); if (data) { $('#avatar-preview').innerHTML = `<img src="${data}" alt="头像">`; $('#avatar-preview').dataset.value = data; } };
   $('#import-file').onchange = importData;
+  $('#copy-invite').onclick = copyInviteCode;
 }
 function openRecord(kind = 'vomit') { if (!pet()) return; const form = $('#record-form'); form.reset(); $('#record-kind').value = kind; $('#record-date').value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,16); $('#weight-field').hidden = kind !== 'weight'; $('#record-dialog').showModal(); }
 async function saveRecord(event) {
@@ -288,7 +330,7 @@ async function saveRecord(event) {
   if (kind === 'weight' && (!Number.isFinite(weight) || weight <= 0)) return alert('请填写正确的体重，例如 5.30');
   const file = form.get('photo'); const id = crypto.randomUUID(); let photo = '', photoPath = '', pendingPhoto = '';
   if (file?.size) photo = await fileData(file, 1600);
-  state.records.push({ id, petId: pet().id, kind, date: form.get('date'), weight: kind === 'weight' ? weight : null, note: String(form.get('note') || '').trim(), photo, photoPath, pendingPhoto });
+  state.records.push({ id, petId: pet().id, kind, date: form.get('date'), weight: kind === 'weight' ? weight : null, note: String(form.get('note') || '').trim(), photo, photoPath, pendingPhoto, createdBy: actor() });
   if (careKinds.includes(kind)) {
     const reminder = pet().reminders[kind];
     reminder.last = String(form.get('date')).slice(0, 10);
@@ -308,31 +350,115 @@ async function saveMeasurement(event) {
   const names = form.getAll('customName'); const customValues = form.getAll('customValue');
   const customMeasurements = names.map((name, index) => ({ name: String(name).trim(), value: Number(String(customValues[index] || '').replace(',', '.')) })).filter(entry => entry.name && Number.isFinite(entry.value) && entry.value > 0);
   if (!Object.values(values).some(Boolean) && !customMeasurements.length) return alert('请至少填写一项身体尺寸。');
-  state.records.push({ id: crypto.randomUUID(), petId: pet().id, kind: 'measurement', date: `${form.get('date')}T12:00`, ...values, customMeasurements, note: String(form.get('note') || '').trim(), photo: '', photoPath: '', pendingPhoto: '' });
+  state.records.push({ id: crypto.randomUUID(), petId: pet().id, kind: 'measurement', date: `${form.get('date')}T12:00`, ...values, customMeasurements, note: String(form.get('note') || '').trim(), photo: '', photoPath: '', pendingPhoto: '', createdBy: actor() });
   await save(); $('#measurement-dialog').close(); render(); toast('身体尺寸已记录');
 }
 function openPet(id = null) { editingPetId = id; const current = id ? state.pets.find(item => item.id === id) : null; const form = $('#pet-form'); form.reset(); $('#pet-dialog-title').textContent = current ? '编辑宠物' : '添加宠物'; ['name','breed','sex','sterilized','birthday','chip'].forEach(key => form.elements[key].value = current?.[key] || ''); $('#avatar-preview').dataset.value = current?.avatar || ''; $('#avatar-preview').innerHTML = current?.avatar ? `<img src="${escapeHtml(current.avatar)}" alt="头像">` : ''; $('#pet-dialog').showModal(); }
-async function savePet(event) { event.preventDefault(); const form = new FormData(event.target); const current = editingPetId ? state.pets.find(item => item.id === editingPetId) : newPet(); const avatar = $('#avatar-preview').dataset.value || ''; Object.assign(current, { name: String(form.get('name')).trim(), breed: String(form.get('breed')).trim(), sex: String(form.get('sex') || ''), sterilized: String(form.get('sterilized') || ''), birthday: form.get('birthday'), chip: String(form.get('chip') || ''), avatar, avatarPath: '', pendingAvatar: '' }); if (!editingPetId) { state.pets.push(current); state.selectedPetId = current.id; } await save(); $('#pet-dialog').close(); render(); }
+async function savePet(event) { event.preventDefault(); const form = new FormData(event.target); const current = editingPetId ? state.pets.find(item => item.id === editingPetId) : newPet(); const avatar = $('#avatar-preview').dataset.value || ''; Object.assign(current, { name: String(form.get('name')).trim(), breed: String(form.get('breed')).trim(), sex: String(form.get('sex') || ''), sterilized: String(form.get('sterilized') || ''), birthday: form.get('birthday'), chip: String(form.get('chip') || ''), avatar, avatarPath: '', pendingAvatar: '' }); if (!editingPetId) { current.createdBy = actor(); state.pets.push(current); state.selectedPetId = current.id; } await save(); $('#pet-dialog').close(); render(); }
 function openReminder(kind) { editingReminder = kind; const r = pet().reminders[kind]; const form = $('#reminder-form'); $('#reminder-title').textContent = `${kinds[kind][1]}提醒`; form.elements.interval.value = r.interval; form.elements.last.value = r.last || ''; form.elements.time.value = r.time || '09:00'; $('#reminder-dialog').showModal(); }
 async function saveReminder(event) { event.preventDefault(); const form = new FormData(event.target); const r = pet().reminders[editingReminder]; r.interval = Math.max(1, Number(form.get('interval')) || defaults[editingReminder]); r.last = form.get('last'); r.time = form.get('time') || '09:00'; r.calendarAddedFor = ''; await save(); $('#reminder-dialog').close(); render(); }
-async function completeReminder(kind) { const current = pet(); const r = current.reminders[kind]; if (!confirm(`确认 ${current.name} 今天已完成${kinds[kind][1]}吗？`)) return; r.last = todayISO(); r.calendarAddedFor = ''; state.records.push({ id: crypto.randomUUID(), petId: current.id, kind, date: `${todayISO()}T${new Date().toTimeString().slice(0,5)}`, weight: null, note: '从提醒中一键完成', photo: '', photoPath: '', pendingPhoto: '' }); await save(); render(); toast(`已完成${kinds[kind][1]}，下次日期已自动计算`); }
+async function completeReminder(kind) { const current = pet(); const r = current.reminders[kind]; if (!confirm(`确认 ${current.name} 今天已完成${kinds[kind][1]}吗？`)) return; r.last = todayISO(); r.calendarAddedFor = ''; state.records.push({ id: crypto.randomUUID(), petId: current.id, kind, date: `${todayISO()}T${new Date().toTimeString().slice(0,5)}`, weight: null, note: '从提醒中一键完成', photo: '', photoPath: '', pendingPhoto: '', createdBy: actor() }); await save(); render(); toast(`已完成${kinds[kind][1]}，下次日期已自动计算`); }
 async function deleteRecord(id) { const record = state.records.find(item => item.id === id); if (!record || !confirm(`确定删除这条${kindInfo(record.kind)[1]}记录吗？`)) return; state.records = state.records.filter(item => item.id !== id); await save(); render(); }
 async function deletePet() { const current = pet(); if (!current || !confirm(`确定删除 ${current.name} 和它的所有记录吗？此操作无法撤销。`)) return; state.records = state.records.filter(r => r.petId !== current.id); state.pets = state.pets.filter(item => item.id !== current.id); state.selectedPetId = state.pets[0]?.id || ''; await save(); render(); }
 
 function fileData(file, max = 1600) { return new Promise(resolve => { if (!file?.size) return resolve(''); const reader = new FileReader(); reader.onload = () => { const img = new Image(); img.onload = () => { const scale = Math.min(1, max / Math.max(img.width, img.height)); const canvas = document.createElement('canvas'); canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale); canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height); resolve(canvas.toDataURL('image/jpeg', .82)); }; img.onerror = () => resolve(reader.result); img.src = reader.result; }; reader.readAsDataURL(file); }); }
 function cloudPayload() { const copy = structuredClone(state); copy.records.forEach(record => { delete record.pendingPhoto; if (record.photo?.startsWith('data:')) record.photo = ''; }); copy.pets.forEach(item => { delete item.pendingAvatar; if (item.avatar?.startsWith('data:')) item.avatar = ''; }); return copy; }
 function mergeLocalMedia(cloudState, localState) { const localRecords = new Map((localState?.records || []).map(item => [item.id, item])); const localPets = new Map((localState?.pets || []).map(item => [item.id, item])); cloudState.records.forEach(item => { const local = localRecords.get(item.id); if (local?.photo) item.photo = local.photo; }); cloudState.pets.forEach(item => { const local = localPets.get(item.id); if (local?.avatar) item.avatar = local.avatar; }); return cloudState; }
-function cloudRef() { return doc(firestore, 'users', cloudUser.uid, 'app', 'pawsnote'); }
+function legacyCloudRef() { return doc(firestore, 'users', cloudUser.uid, 'app', 'pawsnote'); }
+function profileRef() { return doc(firestore, 'users', cloudUser.uid, 'profile', 'petlog'); }
+function familyRef(id = activeFamily?.id) { return doc(firestore, 'families', id); }
+function familyAppRef(id = activeFamily?.id) { return doc(firestore, 'families', id, 'app', 'petlog'); }
+function memberRef(familyId, uid = cloudUser.uid) { return doc(firestore, 'families', familyId, 'members', uid); }
+function inviteRef(code) { return doc(firestore, 'invites', code); }
+function makeInviteCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, byte => chars[byte % chars.length]).join('');
+}
+async function unusedInviteCode() {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const code = makeInviteCode();
+    if (!(await getDoc(inviteRef(code))).exists()) return code;
+  }
+  throw new Error('invite-code-unavailable');
+}
+async function persistProfile() { await setDoc(profileRef(), familyProfile, { merge: true }); }
+async function createFamily(seedState) {
+  const id = crypto.randomUUID(); const inviteCode = await unusedInviteCode(); const name = '我的家庭';
+  const family = { id, name, ownerId: cloudUser.uid, inviteCode, createdAt: serverTimestamp() };
+  await setDoc(familyRef(id), family);
+  await setDoc(memberRef(id), { uid: cloudUser.uid, email: cloudUser.email || '', displayName: cloudUser.displayName || '', role: 'owner', joinedAt: serverTimestamp() });
+  await setDoc(inviteRef(inviteCode), { familyId: id, ownerId: cloudUser.uid, active: true, createdAt: serverTimestamp() });
+  await setDoc(familyAppRef(id), { payload: cloudPayloadFrom(seedState), clientModifiedAt: seedState.modifiedAt, updatedAt: serverTimestamp(), updatedBy: actor() });
+  familyProfile = { activeFamilyId: id, families: [{ id, name, role: 'owner' }] };
+  await persistProfile();
+  return family;
+}
+function cloudPayloadFrom(source) {
+  const previous = state; state = source; const payload = cloudPayload(); state = previous; return payload;
+}
 function queueCloudSync() { if (!cloudUser || !cloudReady) return; cloudStatus = { tone: 'syncing', text: '正在同步…' }; if (page === 'settings') render(); clearTimeout(cloudSyncTimer); cloudSyncTimer = setTimeout(() => syncCloud(), 650); }
-async function syncCloud(manual = false) { if (!cloudUser || !cloudReady) return; cloudStatus = { tone: 'syncing', text: '正在同步…' }; if (page === 'settings') render(); try { await saveLocal(); await setDoc(cloudRef(), { payload: cloudPayload(), clientModifiedAt: state.modifiedAt, updatedAt: serverTimestamp() }); cloudStatus = { tone: 'success', text: '已同步' }; render(); toast(manual ? '云端同步完成' : '资料已自动同步'); } catch (error) { cloudStatus = { tone: 'error', text: '同步失败，请检查网络' }; render(); toast('同步失败，请稍后再试', 'error'); console.warn(error); } }
+async function syncCloud(manual = false) { if (!cloudUser || !cloudReady || !activeFamily?.id || applyingRemote) return; cloudStatus = { tone: 'syncing', text: '正在同步…' }; if (page === 'settings') render(); try { await saveLocal(); await setDoc(familyAppRef(), { payload: cloudPayload(), clientModifiedAt: state.modifiedAt, updatedAt: serverTimestamp(), updatedBy: actor() }); cloudStatus = { tone: 'success', text: '已同步到家庭' }; render(); if (manual) toast('家庭资料同步完成'); } catch (error) { cloudStatus = { tone: 'error', text: '同步失败，请检查网络' }; render(); toast('同步失败，请稍后再试', 'error'); console.warn(error); } }
+async function connectFamily(id) {
+  familyUnsubscribe?.(); memberUnsubscribe?.(); familyUnsubscribe = null; memberUnsubscribe = null; cloudReady = false;
+  const familySnapshot = await getDoc(familyRef(id)); if (!familySnapshot.exists()) throw new Error('family-not-found');
+  activeFamily = { id, ...familySnapshot.data() }; storageKey = `family:${id}`; familyMembers = [];
+  const local = await dbGet(`state:${storageKey}`); const appSnapshot = await getDoc(familyAppRef(id)); const remote = appSnapshot.exists() ? appSnapshot.data().payload : null;
+  if (remote?.pets) state = mergeLocalMedia(migrate(remote), local || state); else state = migrate(local || blankState());
+  await dbPut(`state:${storageKey}`, state); cloudReady = true; cloudStatus = { tone: 'success', text: remote ? '家庭资料已同步' : '家庭已创建' }; render();
+  let firstAppSnapshot = true;
+  familyUnsubscribe = onSnapshot(familyAppRef(id), async snapshot => {
+    if (firstAppSnapshot) { firstAppSnapshot = false; return; }
+    const payload = snapshot.data()?.payload; if (!payload?.pets || snapshot.metadata.hasPendingWrites) return;
+    applyingRemote = true; state = mergeLocalMedia(migrate(payload), state); await saveLocal(); applyingRemote = false; render(); toast('共同照顾者更新了资料');
+  }, error => { cloudStatus = { tone: 'error', text: '家庭同步已中断' }; render(); console.warn(error); });
+  memberUnsubscribe = onSnapshot(collection(firestore, 'families', id, 'members'), snapshot => { familyMembers = snapshot.docs.map(item => item.data()); if (page === 'settings') render(); });
+  setTimeout(checkDueNotifications, 600);
+}
 async function connectCloud(user) {
-  cloudUser = user; cloudReady = false; cloudStatus = { tone: 'syncing', text: '正在读取云端资料…' }; storageKey = `user:${user.uid}`;
-  let local = await dbGet(`state:${storageKey}`); const hasUserLocal = Boolean(local); const guest = await dbGet('state:guest'); if (!local && guest) local = guest; state = migrate(local || blankState()); render();
-  try { const snapshot = await getDoc(cloudRef()); const cloud = snapshot.exists() ? snapshot.data().payload : null; let useLocal = false; if (cloud?.pets) { const migratedCloud = mergeLocalMedia(migrate(cloud), state); useLocal = hasUserLocal && String(state.modifiedAt || '') > String(migratedCloud.modifiedAt || ''); if (!useLocal) state = migratedCloud; } await dbPut(`state:${storageKey}`, state); cloudReady = true; cloudStatus = { tone: 'success', text: cloud ? (useLocal ? '本机资料较新' : '已从云端恢复') : '已创建云端备份' }; render(); if (!cloud || useLocal) await syncCloud(); else toast('云端资料已恢复'); setTimeout(checkDueNotifications, 600); } catch (error) { cloudReady = false; cloudStatus = { tone: 'error', text: '云端暂时不可用' }; render(); toast('云端读取失败，本机资料仍然安全', 'error'); console.warn(error); }
+  cloudUser = user; cloudReady = false; cloudStatus = { tone: 'syncing', text: '正在读取家庭资料…' }; render();
+  try {
+    const profileSnapshot = await getDoc(profileRef()); familyProfile = profileSnapshot.exists() ? profileSnapshot.data() : { activeFamilyId: '', families: [] };
+    familyProfile.families = Array.isArray(familyProfile.families) ? familyProfile.families : [];
+    if (!familyProfile.families.length) {
+      let seed = await dbGet(`state:user:${user.uid}`) || await dbGet('state:guest') || blankState();
+      const legacySnapshot = await getDoc(legacyCloudRef()); const legacy = legacySnapshot.exists() ? legacySnapshot.data().payload : null;
+      if (legacy?.pets && String(legacy.modifiedAt || '') >= String(seed.modifiedAt || '')) seed = mergeLocalMedia(migrate(legacy), seed);
+      const family = await createFamily(migrate(seed)); familyProfile.activeFamilyId = family.id;
+    }
+    let target = familyProfile.activeFamilyId || familyProfile.families[0]?.id;
+    try { await connectFamily(target); }
+    catch {
+      familyProfile.families = familyProfile.families.filter(item => item.id !== target); target = familyProfile.families[0]?.id || '';
+      familyProfile.activeFamilyId = target; await persistProfile();
+      if (target) await connectFamily(target); else { const family = await createFamily(blankState()); await connectFamily(family.id); }
+    }
+  } catch (error) { cloudReady = false; cloudStatus = { tone: 'error', text: '云端暂时不可用' }; render(); toast('家庭资料读取失败，本机资料仍然安全', 'error'); console.warn(error); }
 }
 async function loginWithGoogle() { try { cloudStatus = { tone: 'syncing', text: '正在打开 Google 登录…' }; render(); await signInWithPopup(auth, googleProvider); } catch (error) { cloudStatus = { tone: 'error', text: '登录失败' }; render(); if (error.code === 'auth/popup-closed-by-user') return; alert(error.code === 'auth/popup-blocked' ? 'Safari 拦截了登录窗口，请允许弹出窗口后重试。' : `Google 登录没有完成：${error.code || '未知原因'}`); } }
-async function logout() { await signOut(auth); cloudUser = null; cloudReady = false; cloudStatus = { tone: 'neutral', text: '未登录' }; storageKey = 'guest'; await loadLocal('guest'); page = 'settings'; render(); }
+async function logout() { familyUnsubscribe?.(); memberUnsubscribe?.(); await signOut(auth); cloudUser = null; activeFamily = null; familyMembers = []; familyProfile = { activeFamilyId: '', families: [] }; cloudReady = false; cloudStatus = { tone: 'neutral', text: '未登录' }; storageKey = 'guest'; await loadLocal('guest'); page = 'settings'; render(); }
 function setupCloud() { onAuthStateChanged(auth, async user => { if (user) await connectCloud(user); else { cloudUser = null; cloudReady = false; cloudStatus = { tone: 'neutral', text: '未登录' }; storageKey = 'guest'; await loadLocal('guest', true); } }); }
+
+function openFamilyDialog(joinOnly = false) {
+  if (!cloudUser) return loginWithGoogle();
+  const owner = activeFamily?.ownerId === cloudUser.uid; $('#invite-owner-area').hidden = !owner || joinOnly; $('#join-family-area').hidden = !joinOnly;
+  $('#family-dialog-title').textContent = joinOnly ? '加入家庭' : '共同照顾'; $('#invite-code').textContent = activeFamily?.inviteCode || '—'; $('#join-family-form').reset(); $('#family-dialog').showModal();
+}
+async function copyInviteCode() {
+  const code = activeFamily?.inviteCode; if (!code) return; try { await navigator.clipboard.writeText(code); toast('邀请码已复制'); } catch { prompt('复制这个邀请码发给共同照顾者：', code); }
+}
+async function joinFamily(event) {
+  event.preventDefault(); if (!cloudUser) return; const code = String(new FormData(event.target).get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (code.length !== 8) return alert('请输入 8 位家庭邀请码。');
+  try {
+    const inviteSnapshot = await getDoc(inviteRef(code)); const invite = inviteSnapshot.data(); if (!inviteSnapshot.exists() || !invite?.active) return alert('邀请码不存在或已经失效。');
+    await setDoc(memberRef(invite.familyId), { uid: cloudUser.uid, email: cloudUser.email || '', displayName: cloudUser.displayName || '', role: 'caregiver', inviteCode: code, joinedAt: serverTimestamp() });
+    const familySnapshot = await getDoc(familyRef(invite.familyId)); if (!familySnapshot.exists()) return alert('这个家庭不存在。'); const family = familySnapshot.data();
+    const entry = { id: invite.familyId, name: family.name || '我的家庭', role: 'caregiver' }; familyProfile.families = [...familyProfile.families.filter(item => item.id !== entry.id), entry]; familyProfile.activeFamilyId = entry.id; await persistProfile();
+    $('#family-dialog').close(); await connectFamily(entry.id); page = 'home'; render(); toast(`已加入${entry.name}`);
+  } catch (error) { console.warn(error); alert('暂时无法加入这个家庭，请确认邀请码并稍后重试。'); }
+}
+async function switchFamily(id) { if (!id || id === activeFamily?.id) return; familyProfile.activeFamilyId = id; await persistProfile(); cloudStatus = { tone: 'syncing', text: '正在切换家庭…' }; render(); try { await connectFamily(id); page = 'home'; render(); } catch (error) { console.warn(error); alert('无法打开这个家庭，你可能已被管理员移除。'); await connectCloud(cloudUser); } }
+async function removeFamilyMember(uid) { if (!activeFamily || activeFamily.ownerId !== cloudUser?.uid || uid === cloudUser.uid) return; const member = familyMembers.find(item => item.uid === uid); if (!confirm(`确定移除 ${member?.displayName || member?.email || '这位共同照顾者'} 吗？`)) return; await deleteDoc(memberRef(activeFamily.id, uid)); toast('已移除共同照顾者'); }
 
 function exportData() { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }); downloadBlob(blob, `petlog-backup-${todayISO()}.json`); }
 async function importData(event) { const file = event.target.files[0]; if (!file) return; try { const imported = JSON.parse(await file.text()); if (!Array.isArray(imported.pets) || !Array.isArray(imported.records)) throw new Error('invalid'); if (!confirm('导入会替换当前账号在这台手机上的资料，确定继续吗？')) return; state = migrate(imported); await save(); render(); toast('备份导入完成'); } catch { alert('这不是有效的 petlog 备份文件。'); } finally { event.target.value = ''; } }

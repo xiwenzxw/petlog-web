@@ -110,6 +110,37 @@ button { -webkit-tap-highlight-color: transparent; }
 .sheet .custom-measurement-row input { margin: 0; }
 .custom-measurement-row button { border-radius: 12px; background: #eceef2; color: #8e8e93; font-size: 22px; }
 
+.record-author { display: block; margin-top: 5px; color: #9a9ca3; font-size: 10px; }
+.family-heading { display: flex; align-items: center; gap: 12px; padding: 15px; border-bottom: 1px solid var(--line); }
+.family-heading > div { flex: 1; min-width: 0; }
+.family-heading strong { display: block; font-size: 15px; }
+.family-heading p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.family-symbol, .member-avatar { display: grid; place-items: center; flex: none; }
+.family-symbol { width: 44px; height: 44px; border-radius: 15px; background: #fff2e7; font-size: 21px; }
+.family-switcher { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 15px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.family-switcher select { width: auto; max-width: 58%; margin: 0; padding: 7px 28px 7px 10px; border: 0; border-radius: 10px; background-color: #f2f4f7; color: var(--ink); font-weight: 650; text-align: right; }
+.member-list { padding: 0 15px; }
+.member-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.member-row:last-child { border-bottom: 0; }
+.member-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(145deg, #dfefff, #e9e5ff); color: #376ca4; font-size: 13px; font-weight: 750; }
+.member-row > div { flex: 1; min-width: 0; }
+.member-row strong { display: block; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.member-row p { margin: 3px 0 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.member-remove { padding: 7px 9px; border-radius: 9px; background: #fff0ef; color: var(--red); font-size: 11px; }
+.family-dialog-body { min-height: 52dvh; max-height: 90dvh; overflow: auto; padding: 12px 18px calc(env(safe-area-inset-bottom) + 22px); border-radius: 28px 28px 0 0; background: #f5f6f8; }
+.family-dialog-body .sheet-head { top: -12px; }
+.family-dialog-body form { min-height: 0; max-height: none; overflow: visible; padding: 0; border-radius: 0; background: transparent; }
+.sheet-head-spacer { width: 42px; }
+.invite-owner-area, .join-family-area { padding: 18px 4px 6px; text-align: center; }
+.invite-illustration { width: 68px; height: 68px; display: grid; place-items: center; margin: 4px auto 14px; border-radius: 23px; background: #fff; box-shadow: 0 8px 28px rgba(25, 38, 55, .08); font-size: 34px; }
+.invite-owner-area h3, .join-family-area h3 { margin: 0 0 8px; font-size: 21px; }
+.invite-owner-area > p, .join-family-area > p { max-width: 430px; margin: 0 auto 18px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.invite-code { margin: 0 auto 14px; padding: 17px; border: 1px dashed #aac7e6; border-radius: 17px; background: #edf6ff; color: #126fc6; font-size: 26px; font-weight: 780; letter-spacing: .18em; }
+.primary-button.wide { width: 100%; }
+.invite-owner-area .privacy-note { margin: 12px auto 0; font-size: 11px; }
+.join-family-area label { text-align: left; }
+.join-family-area input { text-transform: uppercase; letter-spacing: .12em; text-align: center; font-size: 19px; font-weight: 700; }
+
 @media (max-width: 420px) {
   .tabs { width: calc(100% - 16px); }
   .measurement-grid { grid-template-columns: repeat(2, 1fr); }
