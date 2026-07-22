@@ -1,6 +1,6 @@
-# PetLog 网页 App
+# petlog 网页 App
 
-PetLog 是一个可以安装到 iPhone 主屏幕的宠物健康记录、护理提醒与成长档案 PWA。
+petlog 是一个可以安装到 iPhone 主屏幕的宠物健康记录、护理提醒与成长档案 PWA。
 
 ## 已完成的功能
 
