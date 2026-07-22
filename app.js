@@ -1,3 +1,20 @@
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithRedirect, signOut } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
+import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: 'AIzaSyDiu-6FY1u6tegbsMYJlm1v_Yn2QVvUubM',
+  authDomain: 'petlog-backup.firebaseapp.com',
+  projectId: 'petlog-backup',
+  storageBucket: 'petlog-backup.firebasestorage.app',
+  messagingSenderId: '1003436567426',
+  appId: '1:1003436567426:web:3e98fea18dcdfdcaf3fd9b'
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const firestore = getFirestore(firebaseApp);
+const provider = new GoogleAuthProvider();
+
 const kinds = {
   vomit:['🤢','呕吐'], diarrhea:['💩','拉稀'], vet:['🏥','看医生'], deworming:['💊','内驱'],
   flea:['🦟','外驱'], vaccine:['💉','疫苗'], weight:['⚖️','体重'], bath:['🛁','洗澡'],
@@ -7,10 +24,12 @@ const careKinds = ['deworming','flea','vaccine','bath','grooming'];
 const defaultReminders = () => ({ deworming:{interval:30,last:''}, flea:{interval:30,last:''}, vaccine:{interval:365,last:''}, bath:{interval:21,last:''}, grooming:{interval:45,last:''} });
 const blankState = () => ({version:1, selectedPetId:'', pets:[{id:crypto.randomUUID(),name:'Vinvin',breed:'马尔济斯',sex:'',birthday:'',chip:'',avatar:'',reminders:defaultReminders()},{id:crypto.randomUUID(),name:'果冻',breed:'马尔济斯',sex:'',birthday:'',chip:'',avatar:'',reminders:defaultReminders()}],records:[]});
 let state, page='home', editingPetId=null, editingReminder=null;
+let cloudUser=null, cloudReady=false, cloudSyncTimer=null, cloudStatus='未登录';
 
 const db = (() => new Promise((resolve,reject) => { const r=indexedDB.open('petlog-web',1); r.onupgradeneeded=()=>r.result.createObjectStore('store'); r.onsuccess=()=>resolve(r.result); r.onerror=()=>reject(r.error); }))();
 async function load(){ const database=await db; const value=await new Promise((resolve,reject)=>{const r=database.transaction('store','readonly').objectStore('store').get('state');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)}); state=value||blankState(); if(!state.selectedPetId) state.selectedPetId=state.pets[0]?.id||''; render(); }
-async function save(){ const database=await db; await new Promise((resolve,reject)=>{const r=database.transaction('store','readwrite').objectStore('store').put(state,'state');r.onsuccess=resolve;r.onerror=()=>reject(r.error)}); }
+async function saveLocal(){ const database=await db; await new Promise((resolve,reject)=>{const r=database.transaction('store','readwrite').objectStore('store').put(state,'state');r.onsuccess=resolve;r.onerror=()=>reject(r.error)}); }
+async function save(){ await saveLocal(); queueCloudSync(); }
 const pet=()=>state.pets.find(x=>x.id===state.selectedPetId);
 const records=()=>state.records.filter(x=>x.petId===pet()?.id).sort((a,b)=>new Date(b.date)-new Date(a.date));
 const weights=()=>records().filter(x=>x.kind==='weight'&&Number.isFinite(x.weight));
@@ -27,9 +46,10 @@ function reminderPage(){const p=pet();if(!p)return noPets();const rs=p.reminders
 function stats(){const ws=weights().slice().reverse(), counts=['vomit','diarrhea','vet'].map(k=>records().filter(r=>r.kind===k).length);const max=Math.max(...ws.map(x=>x.weight),1), min=Math.min(...ws.map(x=>x.weight),0);return `<header class="topbar"><div class="brand">健康统计</div></header><div class="section-head"><h2>今年</h2></div><section class="stats">${[['🤢','呕吐',counts[0]],['💩','拉稀',counts[1]],['🏥','医生',counts[2]]].map(x=>`<div class="stat"><span>${x[0]}</span><b>${x[2]}</b><small>${x[1]}</small></div>`).join('')}</section><div class="section-head"><h2>体重趋势</h2>${ws.length?`<span class="subtle">${ws.length} 次记录</span>`:''}</div>${ws.length?`<section class="chart-row">${ws.map(w=>`<div class="bar-wrap" title="${localDate(w.date)} ${w.weight}kg"><div class="bar" style="height:${Math.max(8,((w.weight-min)/(max-min||1))*100)}%"></div></div>`).join('')}</section><div class="section-head"><h2>称重记录</h2></div><section class="timeline">${recordRows(weights().slice(0,30))}</section>`:'<section class="timeline"><div class="empty">添加第一条体重记录后，这里会显示变化趋势。</div></section>'}`}
 function petsPage(){const p=pet();return `<header class="topbar"><div class="brand">宠物</div><button id="add-pet" class="icon-button">＋</button></header><section class="card-list">${state.pets.map(x=>`<button class="pet-card" data-edit-pet="${x.id}">${avatar(x)}<div><strong>${escape(x.name)}</strong><span class="subtle">${escape(x.breed||'我的毛孩子')}</span></div><span class="push subtle">编辑 ›</span></button>`).join('')}</section>${p?`<div class="section-head"><h2>资料与备份</h2></div><section class="settings-card"><button id="export">导出备份文件</button><button id="import">导入备份文件</button><button id="delete-pet" class="delete">删除当前宠物</button></section><p class="hint">记录仅保存在这台手机。建议不时导出备份文件到“文件”或 iCloud Drive。</p>`:''}`}
 function noPets(){return '<header class="topbar"><div class="brand">PetLog</div></header><div class="empty"><p>还没有宠物资料。</p><button id="add-pet" class="text-button primary">添加第一只宠物</button></div>'}
-function render(){const body=page==='home'?home():page==='reminders'?reminderPage():page==='stats'?stats():petsPage();document.querySelector('#app').innerHTML=`<div class="app">${body}${nav()}</div>`;bindPage()}
+function cloudBar(){return cloudUser?`<div class="cloud-bar"><span class="cloud-name">☁️ ${cloudStatus} · ${escape(cloudUser.email||'Google 账号')}</span><button id="logout">退出</button></div>`:`<div class="cloud-bar"><span>☁️ 登录后自动备份，不怕换手机</span><button id="login">登录同步</button></div>`}
+function render(){const body=page==='home'?home():page==='reminders'?reminderPage():page==='stats'?stats():petsPage();document.querySelector('#app').innerHTML=`<div class="app">${cloudBar()}${body}${nav()}</div>`;bindPage()}
 
-function bindPage(){document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render()});document.querySelector('#pet-select')?.addEventListener('change',async e=>{state.selectedPetId=e.target.value;await save();render()});document.querySelector('#add-record')?.addEventListener('click',openRecord);document.querySelector('#add-pet')?.addEventListener('click',()=>openPet());document.querySelectorAll('[data-edit-pet]').forEach(b=>b.onclick=()=>openPet(b.dataset.editPet));document.querySelectorAll('[data-reminder]').forEach(b=>b.onclick=()=>openReminder(b.dataset.reminder));document.querySelector('#export')?.addEventListener('click',exportData);document.querySelector('#import')?.addEventListener('click',()=>document.querySelector('#import-file').click());document.querySelector('#delete-pet')?.addEventListener('click',deletePet)}
+function bindPage(){document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render()});document.querySelector('#pet-select')?.addEventListener('change',async e=>{state.selectedPetId=e.target.value;await save();render()});document.querySelector('#add-record')?.addEventListener('click',openRecord);document.querySelector('#add-pet')?.addEventListener('click',()=>openPet());document.querySelectorAll('[data-edit-pet]').forEach(b=>b.onclick=()=>openPet(b.dataset.editPet));document.querySelectorAll('[data-reminder]').forEach(b=>b.onclick=()=>openReminder(b.dataset.reminder));document.querySelector('#export')?.addEventListener('click',exportData);document.querySelector('#import')?.addEventListener('click',()=>document.querySelector('#import-file').click());document.querySelector('#delete-pet')?.addEventListener('click',deletePet);document.querySelector('#login')?.addEventListener('click',login);document.querySelector('#logout')?.addEventListener('click',logout)}
 const $=s=>document.querySelector(s);
 function setupDialogs(){document.querySelectorAll('.close').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('#record-kind').innerHTML=Object.entries(kinds).map(([id,v])=>`<option value="${id}">${v[0]} ${v[1]}</option>`).join('');$('#record-kind').onchange=()=>{$('#weight-field').hidden=$('#record-kind').value!=='weight'};$('#record-form').onsubmit=saveRecord;$('#pet-form').onsubmit=savePet;$('#reminder-form').onsubmit=saveReminder;$('#pet-form [name=avatar]').onchange=e=>fileData(e.target.files[0]).then(d=>{if(d){$('#avatar-preview').innerHTML=`<img src="${d}" alt="头像">`;$('#avatar-preview').dataset.value=d}});$('#import-file').onchange=importData}
 function openRecord(){const form=$('#record-form');form.reset();$('#record-date').value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);$('#weight-field').hidden=true;$('#record-dialog').showModal()}
@@ -42,4 +62,59 @@ async function deletePet(){const p=pet();if(!p||!confirm(`确定删除 ${p.name}
 function fileData(file){return new Promise(resolve=>{if(!file)return resolve('');const r=new FileReader();r.onload=()=>resolve(r.result);r.readAsDataURL(file)})}
 function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`PetLog-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url)}
 async function importData(e){const file=e.target.files[0];if(!file)return;try{const imported=JSON.parse(await file.text());if(!Array.isArray(imported.pets)||!Array.isArray(imported.records))throw Error();if(!confirm('导入会替换目前手机上的所有 PetLog 资料，确定继续吗？'))return;state=imported;state.selectedPetId||=state.pets[0]?.id||'';await save();render()}catch{alert('这不是有效的 PetLog 备份文件。')}finally{e.target.value=''}}
-if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js');setupDialogs();load();
+
+async function login(){
+  try { await signInWithRedirect(auth, provider); }
+  catch (error) { alert(`无法开始 Google 登录：${error.message}`); }
+}
+async function logout(){
+  await signOut(auth);
+  cloudUser=null; cloudReady=false; cloudStatus='未登录'; render();
+}
+function cloudRef(){ return doc(firestore, 'users', cloudUser.uid, 'app', 'petlog'); }
+function queueCloudSync(){
+  if(!cloudUser || !cloudReady) return;
+  cloudStatus='正在备份…'; render();
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer=setTimeout(syncCloud, 700);
+}
+async function syncCloud(){
+  if(!cloudUser || !cloudReady) return;
+  try {
+    await setDoc(cloudRef(), { payload: state, updatedAt: serverTimestamp() });
+    cloudStatus='已自动备份'; render();
+  } catch (error) {
+    cloudStatus='等待网络'; render();
+    console.warn('PetLog cloud sync failed', error);
+  }
+}
+async function connectCloud(user){
+  cloudUser=user; cloudStatus='正在读取备份…'; render();
+  try {
+    const snapshot=await getDoc(cloudRef());
+    if(snapshot.exists() && snapshot.data().payload?.pets) {
+      state=snapshot.data().payload;
+      state.selectedPetId||=state.pets[0]?.id||'';
+      await saveLocal();
+      cloudStatus='已从云端恢复';
+    } else {
+      cloudStatus='正在创建第一份备份';
+      cloudReady=true;
+      await syncCloud();
+      return;
+    }
+    cloudReady=true;
+  } catch (error) {
+    cloudReady=false; cloudStatus='云端暂时不可用';
+    console.warn('PetLog cloud restore failed', error);
+  }
+  render();
+}
+function setupCloud(){
+  onAuthStateChanged(auth, user => {
+    if(user) connectCloud(user);
+    else { cloudUser=null; cloudReady=false; cloudStatus='未登录'; render(); }
+  });
+}
+
+if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js');setupDialogs();load().then(setupCloud);

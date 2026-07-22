@@ -20,3 +20,9 @@
 ## 备份
 
 进入「宠物」页，点「导出备份文件」，把 JSON 文件保存到 iCloud Drive 或“文件”。换手机后打开网页，再点「导入备份文件」即可恢复。
+
+## Google 自动同步
+
+发布最新文件后，首次打开 PetLog 时点击顶部的「登录同步」，使用自己的 Google 账号登录。资料会保留在手机本机，同时自动同步至私人 Firebase 数据库。
+
+如果 Google 登录提示「未经授权的域名」，在 Firebase Console 打开 `Authentication → 设置 → 已获授权的网域`，添加 GitHub Pages 的域名，例如 `你的用户名.github.io`（不要加 `https://` 或路径）。
