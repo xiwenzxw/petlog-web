@@ -23,6 +23,6 @@
 
 ## Google 自动同步
 
-发布最新文件后，首次打开 PetLog 时点击顶部的「登录同步」，使用自己的 Google 账号登录。资料会保留在手机本机，同时自动同步至私人 Firebase 数据库。
+发布最新文件后，首次打开 PetLog 时点击顶部的「Google 登录」，在弹出的 Google 页面选择帐号即可。资料会保留在手机本机，同时自动同步至该 Google 帐号的私人 Firebase 数据库。朋友也可以用自己的 Google 帐号登录；每个帐号的数据彼此独立，互相看不到。
 
 如果 Google 登录提示「未经授权的域名」，在 Firebase Console 打开 `Authentication → 设置 → 已获授权的网域`，添加 GitHub Pages 的域名，例如 `你的用户名.github.io`（不要加 `https://` 或路径）。

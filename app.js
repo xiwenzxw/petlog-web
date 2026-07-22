@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithRedirect, signOut, getRedirectResult } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 
 const firebaseConfig = {
@@ -13,7 +13,7 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const firestore = getFirestore(firebaseApp);
-const provider = new GoogleAuthProvider();
+const googleProvider = new GoogleAuthProvider();
 
 const kinds = {
   vomit:['🤢','呕吐'], diarrhea:['💩','拉稀'], vet:['🏥','看医生'], deworming:['💊','内驱'],
@@ -46,10 +46,10 @@ function reminderPage(){const p=pet();if(!p)return noPets();const rs=p.reminders
 function stats(){const ws=weights().slice().reverse(), counts=['vomit','diarrhea','vet'].map(k=>records().filter(r=>r.kind===k).length);const max=Math.max(...ws.map(x=>x.weight),1), min=Math.min(...ws.map(x=>x.weight),0);return `<header class="topbar"><div class="brand">健康统计</div></header><div class="section-head"><h2>今年</h2></div><section class="stats">${[['🤢','呕吐',counts[0]],['💩','拉稀',counts[1]],['🏥','医生',counts[2]]].map(x=>`<div class="stat"><span>${x[0]}</span><b>${x[2]}</b><small>${x[1]}</small></div>`).join('')}</section><div class="section-head"><h2>体重趋势</h2>${ws.length?`<span class="subtle">${ws.length} 次记录</span>`:''}</div>${ws.length?`<section class="chart-row">${ws.map(w=>`<div class="bar-wrap" title="${localDate(w.date)} ${w.weight}kg"><div class="bar" style="height:${Math.max(8,((w.weight-min)/(max-min||1))*100)}%"></div></div>`).join('')}</section><div class="section-head"><h2>称重记录</h2></div><section class="timeline">${recordRows(weights().slice(0,30))}</section>`:'<section class="timeline"><div class="empty">添加第一条体重记录后，这里会显示变化趋势。</div></section>'}`}
 function petsPage(){const p=pet();return `<header class="topbar"><div class="brand">宠物</div><button id="add-pet" class="icon-button">＋</button></header><section class="card-list">${state.pets.map(x=>`<button class="pet-card" data-edit-pet="${x.id}">${avatar(x)}<div><strong>${escape(x.name)}</strong><span class="subtle">${escape(x.breed||'我的毛孩子')}</span></div><span class="push subtle">编辑 ›</span></button>`).join('')}</section>${p?`<div class="section-head"><h2>资料与备份</h2></div><section class="settings-card"><button id="export">导出备份文件</button><button id="import">导入备份文件</button><button id="delete-pet" class="delete">删除当前宠物</button></section><p class="hint">记录仅保存在这台手机。建议不时导出备份文件到“文件”或 iCloud Drive。</p>`:''}`}
 function noPets(){return '<header class="topbar"><div class="brand">PetLog</div></header><div class="empty"><p>还没有宠物资料。</p><button id="add-pet" class="text-button primary">添加第一只宠物</button></div>'}
-function cloudBar(){return cloudUser?`<div class="cloud-bar"><span class="cloud-name">☁️ ${cloudStatus} · ${escape(cloudUser.email||'Google 账号')}</span><button id="logout">退出</button></div>`:`<div class="cloud-bar"><span>☁️ ${cloudStatus==='未登录'?'登录后自动备份，不怕换手机':cloudStatus}</span><button id="login">登录同步</button></div>`}
+function cloudBar(){return cloudUser?`<div class="cloud-bar"><span class="cloud-name">☁️ ${cloudStatus} · ${escape(cloudUser.email||'Google 账号')}</span><button id="logout">退出</button></div>`:`<div class="cloud-bar"><span>☁️ ${cloudStatus==='未登录'?'用 Google 登录后自动备份，不怕换手机':cloudStatus}</span><button id="login">Google 登录</button></div>`}
 function render(){const body=page==='home'?home():page==='reminders'?reminderPage():page==='stats'?stats():petsPage();document.querySelector('#app').innerHTML=`<div class="app">${cloudBar()}${body}${nav()}</div>`;bindPage()}
 
-function bindPage(){document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render()});document.querySelector('#pet-select')?.addEventListener('change',async e=>{state.selectedPetId=e.target.value;await save();render()});document.querySelector('#add-record')?.addEventListener('click',openRecord);document.querySelector('#add-pet')?.addEventListener('click',()=>openPet());document.querySelectorAll('[data-edit-pet]').forEach(b=>b.onclick=()=>openPet(b.dataset.editPet));document.querySelectorAll('[data-reminder]').forEach(b=>b.onclick=()=>openReminder(b.dataset.reminder));document.querySelector('#export')?.addEventListener('click',exportData);document.querySelector('#import')?.addEventListener('click',()=>document.querySelector('#import-file').click());document.querySelector('#delete-pet')?.addEventListener('click',deletePet);document.querySelector('#login')?.addEventListener('click',login);document.querySelector('#logout')?.addEventListener('click',logout)}
+function bindPage(){document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render()});document.querySelector('#pet-select')?.addEventListener('change',async e=>{state.selectedPetId=e.target.value;await save();render()});document.querySelector('#add-record')?.addEventListener('click',openRecord);document.querySelector('#add-pet')?.addEventListener('click',()=>openPet());document.querySelectorAll('[data-edit-pet]').forEach(b=>b.onclick=()=>openPet(b.dataset.editPet));document.querySelectorAll('[data-reminder]').forEach(b=>b.onclick=()=>openReminder(b.dataset.reminder));document.querySelector('#export')?.addEventListener('click',exportData);document.querySelector('#import')?.addEventListener('click',()=>document.querySelector('#import-file').click());document.querySelector('#delete-pet')?.addEventListener('click',deletePet);document.querySelector('#login')?.addEventListener('click',loginWithGoogle);document.querySelector('#logout')?.addEventListener('click',logout)}
 const $=s=>document.querySelector(s);
 function setupDialogs(){document.querySelectorAll('.close').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('#record-kind').innerHTML=Object.entries(kinds).map(([id,v])=>`<option value="${id}">${v[0]} ${v[1]}</option>`).join('');$('#record-kind').onchange=()=>{$('#weight-field').hidden=$('#record-kind').value!=='weight'};$('#record-form').onsubmit=saveRecord;$('#pet-form').onsubmit=savePet;$('#reminder-form').onsubmit=saveReminder;$('#pet-form [name=avatar]').onchange=e=>fileData(e.target.files[0]).then(d=>{if(d){$('#avatar-preview').innerHTML=`<img src="${d}" alt="头像">`;$('#avatar-preview').dataset.value=d}});$('#import-file').onchange=importData}
 function openRecord(){const form=$('#record-form');form.reset();$('#record-date').value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);$('#weight-field').hidden=true;$('#record-dialog').showModal()}
@@ -63,9 +63,18 @@ function fileData(file){return new Promise(resolve=>{if(!file)return resolve('')
 function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`PetLog-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url)}
 async function importData(e){const file=e.target.files[0];if(!file)return;try{const imported=JSON.parse(await file.text());if(!Array.isArray(imported.pets)||!Array.isArray(imported.records))throw Error();if(!confirm('导入会替换目前手机上的所有 PetLog 资料，确定继续吗？'))return;state=imported;state.selectedPetId||=state.pets[0]?.id||'';await save();render()}catch{alert('这不是有效的 PetLog 备份文件。')}finally{e.target.value=''}}
 
-async function login(){
-  try { cloudStatus='正在打开 Google 登录…'; render(); await signInWithRedirect(auth, provider); }
-  catch (error) { cloudStatus='无法开始登录'; render(); alert(`无法开始 Google 登录：${error.message}`); }
+async function loginWithGoogle(){
+  try {
+    cloudStatus='正在打开 Google 登录…'; render();
+    await signInWithPopup(auth, googleProvider);
+  } catch (error) {
+    cloudStatus='未登录'; render();
+    if(error.code==='auth/popup-closed-by-user') return;
+    const message=error.code==='auth/popup-blocked'
+      ? 'Safari 拦截了 Google 登录窗口。请再点一次「Google 登录」，并允许打开窗口。'
+      : `Google 登录没有完成：${error.code||'未知原因'}。请确认已在 Firebase 启用 Google 登录，并稍后再试。`;
+    alert(message);
+  }
 }
 async function logout(){
   await signOut(auth);
@@ -111,10 +120,6 @@ async function connectCloud(user){
   render();
 }
 function setupCloud(){
-  getRedirectResult(auth).catch(error => {
-    cloudStatus = error.code === 'auth/unauthorized-domain' ? '需要授权此网站网域' : `登录失败：${error.code||'未知错误'}`;
-    render();
-  });
   onAuthStateChanged(auth, user => {
     if(user) connectCloud(user);
     else if(cloudStatus==='未登录') { cloudUser=null; cloudReady=false; render(); }
