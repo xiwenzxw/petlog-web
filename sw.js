@@ -1,4 +1,4 @@
-const CACHE = 'petlog-v5-shared-care';
+const CACHE = 'petlog-v2.0.0';
 const FILES = ['./','./index.html','./styles.css','./petlog.css','./app.js','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install', event => {

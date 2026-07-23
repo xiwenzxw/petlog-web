@@ -16,6 +16,9 @@ const auth = getAuth(firebaseApp);
 const firestore = getFirestore(firebaseApp);
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
+const APP_VERSION = '2.0.0';
+const DATA_SCHEMA_VERSION = 3;
+const PARIS_TIME_ZONE = 'Europe/Paris';
 
 const kinds = {
   vomit: ['🤮', '呕吐'], diarrhea: ['💩', '拉稀'], vet: ['🩺', '看医生'],
@@ -29,14 +32,23 @@ const careKinds = ['deworming', 'flea', 'vaccine', 'bath', 'grooming'];
 const quickKinds = ['vomit', 'diarrhea', 'vet', 'weight', 'deworming', 'other'];
 const defaults = { deworming: 30, flea: 30, vaccine: 365, bath: 21, grooming: 45 };
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const makeId = () => {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (typeof crypto.getRandomValues === 'function') crypto.getRandomValues(bytes);
+  else bytes.forEach((_, index) => { bytes[index] = Math.floor(Math.random() * 256); });
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  return [...bytes].map((byte, index) => `${[4, 6, 8, 10].includes(index) ? '-' : ''}${byte.toString(16).padStart(2, '0')}`).join('');
+};
 const defaultReminders = () => Object.fromEntries(careKinds.map(kind => [kind, {
   interval: defaults[kind], last: '', time: '09:00', calendarAddedFor: ''
 }]));
 const newPet = (name = '', breed = '') => ({
-  id: crypto.randomUUID(), name, breed, sex: '', sterilized: '', birthday: '', chip: '', avatar: '', avatarPath: '', pendingAvatar: '', reminders: defaultReminders()
+  id: makeId(), name, breed, sex: '', sterilized: '', birthday: '', chip: '', avatar: '', avatarPath: '', pendingAvatar: '', reminders: defaultReminders()
 });
 const blankState = () => ({
-  version: 3,
+  version: DATA_SCHEMA_VERSION,
   modifiedAt: new Date().toISOString(),
   selectedPetId: '',
   pets: [],
@@ -93,21 +105,31 @@ let applyingRemote = false;
 
 const $ = selector => document.querySelector(selector);
 const pet = () => state.pets.find(item => item.id === state.selectedPetId);
-const allPetRecords = () => state.records.filter(item => item.petId === pet()?.id).sort((a, b) => new Date(b.date) - new Date(a.date));
+const recordTime = item => {
+  const measured = new Date(item?.date || 0).getTime();
+  const created = new Date(item?.createdAt || 0).getTime();
+  return [Number.isFinite(measured) ? measured : 0, Number.isFinite(created) ? created : 0];
+};
+const newestFirst = (a, b) => {
+  const [aDate, aCreated] = recordTime(a);
+  const [bDate, bCreated] = recordTime(b);
+  return bDate - aDate || bCreated - aCreated;
+};
+const allPetRecords = () => state.records.filter(item => item.petId === pet()?.id).sort(newestFirst);
 const records = () => allPetRecords().filter(item => !hiddenLegacyKinds.has(item.kind) && item.kind !== 'measurement');
 const weights = () => records().filter(item => item.kind === 'weight' && Number.isFinite(Number(item.weight)));
-const measurements = () => allPetRecords().filter(item => item.kind === 'measurement');
+const measurements = () => allPetRecords().filter(item => item.kind === 'measurement').sort(newestFirst);
 const kindInfo = kind => kinds[kind] || legacyKindNames[kind] || specialKindNames[kind] || ['📝', '记录'];
 const escapeHtml = value => String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const dayStart = value => { const d = new Date(value); d.setHours(0, 0, 0, 0); return d; };
-const shortDate = value => new Date(value).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
-const localDate = value => new Date(value).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' });
-const dateTime = value => new Date(value).toLocaleString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const shortDate = value => new Date(value).toLocaleDateString('zh-CN', { timeZone: PARIS_TIME_ZONE, month: 'numeric', day: 'numeric' });
+const localDate = value => new Date(value).toLocaleDateString('zh-CN', { timeZone: PARIS_TIME_ZONE, month: 'long', day: 'numeric' });
+const dateTime = value => new Date(value).toLocaleString('zh-CN', { timeZone: PARIS_TIME_ZONE, year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const isToday = value => dayStart(value).getTime() === dayStart(new Date()).getTime();
 const addDays = (date, days) => { const d = new Date(`${date}T12:00:00`); d.setDate(d.getDate() + Number(days)); return d; };
 const nextDate = reminder => reminder?.last ? addDays(reminder.last, reminder.interval) : null;
 const daysUntil = date => date ? Math.ceil((dayStart(date) - dayStart(new Date())) / 86400000) : null;
-const measurementFields = [['bodyLength', '身长'], ['chest', '胸围'], ['neck', '颈围'], ['height', '肩高'], ['backLength', '背长']];
+const measurementFields = [['bodyLength', '身长'], ['chest', '胸围'], ['neck', '颈围'], ['waist', '腰围'], ['height', '肩高'], ['backLength', '背长']];
 const actor = () => cloudUser ? { uid: cloudUser.uid, name: cloudUser.displayName || cloudUser.email || '共同照顾者', email: cloudUser.email || '' } : null;
 const actorLabel = record => record?.createdBy?.name || record?.createdBy?.email || '';
 
@@ -160,7 +182,7 @@ async function dbPut(key, value) {
 }
 function migrate(input) {
   const value = input && Array.isArray(input.pets) && Array.isArray(input.records) ? input : blankState();
-  value.version = 3;
+  value.version = DATA_SCHEMA_VERSION;
   value.modifiedAt ||= new Date().toISOString();
   value.notificationEnabled ??= false;
   value.pets.forEach(item => {
@@ -252,7 +274,7 @@ function stats() {
   const measurementValue = (key, label) => `<div><span>${label}</span><strong>${Number(latestMeasurement?.[key]) > 0 ? `${Number(latestMeasurement[key]).toFixed(1)} <small>cm</small>` : '—'}</strong></div>`;
   const measurementSummary = item => [...measurementFields.filter(([key]) => Number(item[key]) > 0).map(([key, label]) => `${label} ${Number(item[key]).toFixed(1)}`), ...(item.customMeasurements || []).filter(entry => Number(entry.value) > 0).map(entry => `${entry.name} ${Number(entry.value).toFixed(1)}`)].join(' · ');
   return `${topbar('记录总览')}<section class="summary-strip"><div><b>${current.length + ms.length}</b><span>全部记录</span></div><div><b>${ws.length ? Number(ws[0].weight).toFixed(2) : '—'}</b><span>最新体重 kg</span></div><div><b>${careKinds.filter(kind => daysUntil(nextDate(pet().reminders[kind])) < 0).length}</b><span>逾期提醒</span></div></section>
-    <div class="section-head"><h2>身体尺寸</h2><button id="add-measurement" class="link-button">＋ 记录</button></div><section class="measurement-card"><div class="measurement-head"><span class="measurement-symbol">📐</span><div><strong>${latestMeasurement ? `最近测量 · ${localDate(latestMeasurement.date)}` : '还没有身体尺寸记录'}</strong><p>身长、胸围、颈围、肩高与背长</p></div></div><div class="measurement-grid">${measurementFields.map(([key, label]) => measurementValue(key, label)).join('')}</div>${latestMeasurement?.customMeasurements?.length ? `<div class="custom-measurement-summary">${latestMeasurement.customMeasurements.filter(entry => Number(entry.value) > 0).map(entry => `<span>${escapeHtml(entry.name)} <b>${Number(entry.value).toFixed(1)} cm</b></span>`).join('')}</div>` : ''}${ms.length ? `<div class="measurement-history"><span>共 ${ms.length} 次测量</span>${ms.slice(0,3).map(item => `<button class="measurement-history-row" data-measurement-record="${item.id}"><span>${localDate(item.date)}</span><strong>${escapeHtml(measurementSummary(item))} cm</strong></button>`).join('')}</div>` : '<p class="measurement-empty">点击右上角“记录”添加第一次测量。</p>'}</section>
+    <div class="section-head"><h2>身体尺寸</h2><button id="add-measurement" class="link-button">＋ 记录</button></div><section class="measurement-card"><div class="measurement-head"><span class="measurement-symbol">📐</span><div><strong>${latestMeasurement ? `最近测量 · ${dateTime(latestMeasurement.date)}` : '还没有身体尺寸记录'}</strong><p>身长、胸围、颈围、腰围、肩高与背长</p></div></div><div class="measurement-grid">${measurementFields.map(([key, label]) => measurementValue(key, label)).join('')}</div>${latestMeasurement?.customMeasurements?.length ? `<div class="custom-measurement-summary">${latestMeasurement.customMeasurements.filter(entry => Number(entry.value) > 0).map(entry => `<span>${escapeHtml(entry.name)} <b>${Number(entry.value).toFixed(1)} cm</b></span>`).join('')}</div>` : ''}${ms.length ? `<div class="measurement-history"><span>共 ${ms.length} 次测量</span>${ms.map(item => `<div class="measurement-history-row"><button class="measurement-history-detail" data-measurement-record="${item.id}"><span>${dateTime(item.date)}</span><strong>${escapeHtml(measurementSummary(item))} cm</strong></button><button class="measurement-history-delete" data-delete-measurement="${item.id}" aria-label="删除这次身体尺寸记录">${icons.trash}</button></div>`).join('')}</div>` : '<p class="measurement-empty">点击右上角“记录”添加第一次测量。</p>'}</section>
     <div class="section-head"><h2>记录类型</h2><span>点击查看明细</span></div><section class="stats-grid">${Object.keys(kinds).map(kind => `<button class="stat-card" data-kind-detail="${kind}"><span>${kinds[kind][0]}</span><b>${current.filter(r => r.kind === kind).length}</b><small>${kinds[kind][1]}</small></button>`).join('')}</section>
     <div class="section-head"><h2>体重趋势</h2><span>${ws.length ? `${ws.length} 次记录` : ''}</span></div>${ws.length ? `<button class="chart-card" data-weight-detail>${weightChart(ws)}<span>点击查看完整记录</span></button>` : '<section class="card empty">添加第一条体重记录后，这里会显示变化趋势。</section>'}`;
 }
@@ -278,7 +300,7 @@ function settingsPage() {
     ${familyPanel()}
     <section class="settings-group"><h2>提醒与日历</h2><div class="settings-card"><button id="notifications" class="settings-line">到期通知<span>${state.notificationEnabled ? '已开启' : '开启'} ›</span></button><button id="calendar-all-settings" class="settings-line">导出全部提醒到日历<span>›</span></button></div><p class="settings-hint">浏览器通知会在打开 petlog 时检查；日历提醒可以在 App 未打开时正常出现。</p></section>
     <section class="settings-group"><h2>资料与备份</h2><div class="settings-card"><button id="export" class="settings-line">导出 JSON 备份<span>›</span></button><button id="import" class="settings-line">导入 JSON 备份<span>›</span></button>${pet() ? '<button id="delete-pet" class="settings-line danger">删除当前宠物<span>›</span></button>' : ''}</div></section>
-    <footer class="app-footer"><strong>petlog</strong><span>宠物健康记录 · 版本 3.0</span></footer>`;
+    <footer class="app-footer"><strong>petlog</strong><span>宠物健康记录 · 版本 ${APP_VERSION}</span></footer>`;
 }
 function noPets() { return `${topbar('petlog')}<section class="empty-state"><div>🐾</div><h2>添加你的第一只宠物</h2><p>开始记录健康、体重和护理提醒。</p><button id="add-pet" class="primary-button">添加宠物</button></section>`; }
 function toast(message, tone = 'success') {
@@ -302,6 +324,7 @@ function bindPage() {
   $('#calendar-all')?.addEventListener('click', () => exportCalendar(careKinds)); $('#calendar-all-settings')?.addEventListener('click', () => exportCalendar(careKinds));
   $('#add-measurement')?.addEventListener('click', openMeasurement);
   document.querySelectorAll('[data-measurement-record]').forEach(button => button.onclick = () => { const item = state.records.find(record => record.id === button.dataset.measurementRecord); if (!item) return; const lines = [...measurementFields.filter(([key]) => Number(item[key]) > 0).map(([key,label]) => `${label}：${Number(item[key]).toFixed(1)} cm`), ...(item.customMeasurements || []).filter(entry => Number(entry.value) > 0).map(entry => `${entry.name}：${Number(entry.value).toFixed(1)} cm`)]; if (item.note) lines.push(`备注：${item.note}`); alert(`${dateTime(item.date)}\n${lines.join('\n')}`); });
+  document.querySelectorAll('[data-delete-measurement]').forEach(button => button.onclick = () => deleteMeasurement(button.dataset.deleteMeasurement));
   document.querySelectorAll('[data-kind-detail]').forEach(button => button.onclick = () => { detailKind = button.dataset.kindDetail; page = 'detail'; render(); });
   document.querySelectorAll('[data-weight-detail]').forEach(button => button.onclick = () => { detailKind = 'weight'; page = 'detail'; render(); });
   $('[data-back-stats]')?.addEventListener('click', () => { page = 'stats'; detailKind = null; render(); });
@@ -328,7 +351,7 @@ function openRecord(kind = 'vomit') { if (!pet()) return; const form = $('#recor
 async function saveRecord(event) {
   event.preventDefault(); const form = new FormData(event.target); const kind = form.get('kind'); const weight = Number(String(form.get('weight')).replace(',', '.'));
   if (kind === 'weight' && (!Number.isFinite(weight) || weight <= 0)) return alert('请填写正确的体重，例如 5.30');
-  const file = form.get('photo'); const id = crypto.randomUUID(); let photo = '', photoPath = '', pendingPhoto = '';
+  const file = form.get('photo'); const id = makeId(); let photo = '', photoPath = '', pendingPhoto = '';
   if (file?.size) photo = await fileData(file, 1600);
   state.records.push({ id, petId: pet().id, kind, date: form.get('date'), weight: kind === 'weight' ? weight : null, note: String(form.get('note') || '').trim(), photo, photoPath, pendingPhoto, createdBy: actor() });
   if (careKinds.includes(kind)) {
@@ -343,22 +366,59 @@ function addCustomMeasurementRow(name = '', value = '') {
   row.innerHTML = `<input name="customName" aria-label="尺寸名称" placeholder="名称，如头围" value="${escapeHtml(name)}"><input name="customValue" aria-label="尺寸数值（厘米）" inputmode="decimal" placeholder="cm" value="${escapeHtml(value)}"><button type="button" aria-label="删除这个尺寸">×</button>`;
   row.querySelector('button').onclick = () => row.remove(); $('#custom-measurements').append(row);
 }
-function openMeasurement() { if (!pet()) return; const form = $('#measurement-form'); form.reset(); $('#custom-measurements').innerHTML = ''; form.elements.date.value = todayISO(); $('#measurement-dialog').showModal(); }
+function parisDateTimeInput(value = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: PARIS_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(value).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+function parisLocalToISO(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!match) return new Date().toISOString();
+  const [, year, month, day, hour, minute] = match.map(Number);
+  const wallClockUTC = Date.UTC(year, month - 1, day, hour, minute);
+  const parisParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: PARIS_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date(wallClockUTC)).filter(part => part.type !== 'literal').map(part => [part.type, Number(part.value)]));
+  const displayedUTC = Date.UTC(parisParts.year, parisParts.month - 1, parisParts.day, parisParts.hour, parisParts.minute);
+  return new Date(wallClockUTC - (displayedUTC - wallClockUTC)).toISOString();
+}
+function openMeasurement() {
+  if (!pet()) return;
+  const form = $('#measurement-form');
+  const latest = measurements()[0];
+  form.reset();
+  $('#custom-measurements').innerHTML = '';
+  form.elements.date.value = parisDateTimeInput();
+  measurementFields.forEach(([key]) => { form.elements[key].value = Number(latest?.[key]) > 0 ? latest[key] : ''; });
+  (latest?.customMeasurements || []).forEach(entry => addCustomMeasurementRow(entry.name, entry.value));
+  $('#measurement-dialog').showModal();
+}
 async function saveMeasurement(event) {
   event.preventDefault(); const form = new FormData(event.target); const number = key => { const value = Number(String(form.get(key) || '').replace(',', '.')); return Number.isFinite(value) && value > 0 ? value : null; };
   const values = Object.fromEntries(measurementFields.map(([key]) => [key, number(key)]));
   const names = form.getAll('customName'); const customValues = form.getAll('customValue');
   const customMeasurements = names.map((name, index) => ({ name: String(name).trim(), value: Number(String(customValues[index] || '').replace(',', '.')) })).filter(entry => entry.name && Number.isFinite(entry.value) && entry.value > 0);
   if (!Object.values(values).some(Boolean) && !customMeasurements.length) return alert('请至少填写一项身体尺寸。');
-  state.records.push({ id: crypto.randomUUID(), petId: pet().id, kind: 'measurement', date: `${form.get('date')}T12:00`, ...values, customMeasurements, note: String(form.get('note') || '').trim(), photo: '', photoPath: '', pendingPhoto: '', createdBy: actor() });
+  state.records.push({ id: makeId(), petId: pet().id, kind: 'measurement', date: parisLocalToISO(form.get('date')), createdAt: new Date().toISOString(), ...values, customMeasurements, note: String(form.get('note') || '').trim(), photo: '', photoPath: '', pendingPhoto: '', createdBy: actor() });
   await save(); $('#measurement-dialog').close(); render(); toast('身体尺寸已记录');
 }
 function openPet(id = null) { editingPetId = id; const current = id ? state.pets.find(item => item.id === id) : null; const form = $('#pet-form'); form.reset(); $('#pet-dialog-title').textContent = current ? '编辑宠物' : '添加宠物'; ['name','breed','sex','sterilized','birthday','chip'].forEach(key => form.elements[key].value = current?.[key] || ''); $('#avatar-preview').dataset.value = current?.avatar || ''; $('#avatar-preview').innerHTML = current?.avatar ? `<img src="${escapeHtml(current.avatar)}" alt="头像">` : ''; $('#pet-dialog').showModal(); }
 async function savePet(event) { event.preventDefault(); const form = new FormData(event.target); const current = editingPetId ? state.pets.find(item => item.id === editingPetId) : newPet(); const avatar = $('#avatar-preview').dataset.value || ''; Object.assign(current, { name: String(form.get('name')).trim(), breed: String(form.get('breed')).trim(), sex: String(form.get('sex') || ''), sterilized: String(form.get('sterilized') || ''), birthday: form.get('birthday'), chip: String(form.get('chip') || ''), avatar, avatarPath: '', pendingAvatar: '' }); if (!editingPetId) { current.createdBy = actor(); state.pets.push(current); state.selectedPetId = current.id; } await save(); $('#pet-dialog').close(); render(); }
 function openReminder(kind) { editingReminder = kind; const r = pet().reminders[kind]; const form = $('#reminder-form'); $('#reminder-title').textContent = `${kinds[kind][1]}提醒`; form.elements.interval.value = r.interval; form.elements.last.value = r.last || ''; form.elements.time.value = r.time || '09:00'; $('#reminder-dialog').showModal(); }
 async function saveReminder(event) { event.preventDefault(); const form = new FormData(event.target); const r = pet().reminders[editingReminder]; r.interval = Math.max(1, Number(form.get('interval')) || defaults[editingReminder]); r.last = form.get('last'); r.time = form.get('time') || '09:00'; r.calendarAddedFor = ''; await save(); $('#reminder-dialog').close(); render(); }
-async function completeReminder(kind) { const current = pet(); const r = current.reminders[kind]; if (!confirm(`确认 ${current.name} 今天已完成${kinds[kind][1]}吗？`)) return; r.last = todayISO(); r.calendarAddedFor = ''; state.records.push({ id: crypto.randomUUID(), petId: current.id, kind, date: `${todayISO()}T${new Date().toTimeString().slice(0,5)}`, weight: null, note: '从提醒中一键完成', photo: '', photoPath: '', pendingPhoto: '', createdBy: actor() }); await save(); render(); toast(`已完成${kinds[kind][1]}，下次日期已自动计算`); }
+async function completeReminder(kind) { const current = pet(); const r = current.reminders[kind]; if (!confirm(`确认 ${current.name} 今天已完成${kinds[kind][1]}吗？`)) return; r.last = todayISO(); r.calendarAddedFor = ''; state.records.push({ id: makeId(), petId: current.id, kind, date: `${todayISO()}T${new Date().toTimeString().slice(0,5)}`, weight: null, note: '从提醒中一键完成', photo: '', photoPath: '', pendingPhoto: '', createdBy: actor() }); await save(); render(); toast(`已完成${kinds[kind][1]}，下次日期已自动计算`); }
 async function deleteRecord(id) { const record = state.records.find(item => item.id === id); if (!record || !confirm(`确定删除这条${kindInfo(record.kind)[1]}记录吗？`)) return; state.records = state.records.filter(item => item.id !== id); await save(); render(); }
+async function deleteMeasurement(id) {
+  const record = state.records.find(item => item.id === id && item.kind === 'measurement');
+  if (!record || !confirm(`确定删除 ${dateTime(record.date)} 的身体尺寸记录吗？`)) return;
+  state.records = state.records.filter(item => item.id !== id);
+  await save();
+  render();
+  toast('身体尺寸记录已删除');
+}
 async function deletePet() { const current = pet(); if (!current || !confirm(`确定删除 ${current.name} 和它的所有记录吗？此操作无法撤销。`)) return; state.records = state.records.filter(r => r.petId !== current.id); state.pets = state.pets.filter(item => item.id !== current.id); state.selectedPetId = state.pets[0]?.id || ''; await save(); render(); }
 
 function fileData(file, max = 1600) { return new Promise(resolve => { if (!file?.size) return resolve(''); const reader = new FileReader(); reader.onload = () => { const img = new Image(); img.onload = () => { const scale = Math.min(1, max / Math.max(img.width, img.height)); const canvas = document.createElement('canvas'); canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale); canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height); resolve(canvas.toDataURL('image/jpeg', .82)); }; img.onerror = () => resolve(reader.result); img.src = reader.result; }; reader.readAsDataURL(file); }); }
@@ -384,7 +444,7 @@ async function unusedInviteCode() {
 }
 async function persistProfile() { await setDoc(profileRef(), familyProfile, { merge: true }); }
 async function createFamily(seedState) {
-  const id = crypto.randomUUID(); const inviteCode = await unusedInviteCode(); const name = '我的家庭';
+  const id = makeId(); const inviteCode = await unusedInviteCode(); const name = '我的家庭';
   const family = { id, name, ownerId: cloudUser.uid, inviteCode, createdAt: serverTimestamp() };
   await setDoc(familyRef(id), family);
   await setDoc(memberRef(id), { uid: cloudUser.uid, email: cloudUser.email || '', displayName: cloudUser.displayName || '', role: 'owner', joinedAt: serverTimestamp() });
